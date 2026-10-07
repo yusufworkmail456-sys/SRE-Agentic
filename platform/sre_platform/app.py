@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from .api import agent as agent_api
 from .api import apps as apps_api
 from .api import ask as ask_api
+from .api import postmortem as pm_api
 from .config import settings
 from .db import engine, get_db
 from .models import (
@@ -68,6 +69,7 @@ def create_app() -> FastAPI:
     app.include_router(apps_api.router)
     app.include_router(agent_api.router)
     app.include_router(ask_api.router)
+    app.include_router(pm_api.router)
 
     @app.get("/healthz")
     def healthz(db: Session = Depends(get_db)) -> dict:
@@ -172,7 +174,8 @@ def create_app() -> FastAPI:
     def application_detail(slug: str, request: Request, db: Session = Depends(get_db)):
         from .logstore import window_error_counts
         from .metrics import latest_points
-        from .models import LogBatch
+        from .models import LogBatch, Postmortem, SLO
+        from .postmortem import budget_context_for_recommendations, slo_summary_for_app
 
         app_row = db.scalar(select(Application).where(Application.slug == slug))
         if app_row is None:
@@ -205,6 +208,16 @@ def create_app() -> FastAPI:
                     .limit(12)
                 ).all(),
                 "log_counts": window_error_counts(db, app_row.id, minutes=60),
+                "slos": slo_summary_for_app(db, app_row.id),
+                "budget_note": budget_context_for_recommendations(db, app_row),
+                "postmortems": db.scalars(
+                    select(Postmortem)
+                    .where(Postmortem.incident_id.in_(
+                        select(Incident.id).where(Incident.application_id == app_row.id)
+                    ))
+                    .order_by(Postmortem.created_at.desc())
+                    .limit(10)
+                ).all(),
                 "findings": db.scalars(
                     select(Finding)
                     .where(Finding.application_id == app_row.id)

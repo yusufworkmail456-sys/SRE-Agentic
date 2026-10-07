@@ -469,6 +469,7 @@ class SLO(Base, TimestampMixin):
     application_id: Mapped[int] = mapped_column(ForeignKey("application.id"), index=True)
     sli: Mapped[str] = mapped_column(String(32))  # availability / latency_p95
     target: Mapped[float] = mapped_column(Float)  # 0.999
+    target_ms: Mapped[float | None] = mapped_column(Float)  # for latency_p95
     window_days: Mapped[int] = mapped_column(Integer, default=30)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 

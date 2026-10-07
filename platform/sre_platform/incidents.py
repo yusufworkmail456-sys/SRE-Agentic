@@ -271,6 +271,7 @@ def check_recovery(db: Session) -> int:
         if checks and all(h.consecutive_oks >= RECOVERY_CLOSE_OKS or h.consecutive_failures == 0 for h in checks):
             incident.status = IncidentStatus.resolved
             incident.resolved_at = datetime.now(UTC)
+            incident.detected_at = incident.detected_at.replace(tzinfo=UTC) if incident.detected_at.tzinfo is None else incident.detected_at
             incident.mitigated_at = incident.mitigated_at or incident.resolved_at
             incident.mttr_s = int((incident.resolved_at - incident.detected_at).total_seconds())
             db.add(IncidentEvent(incident_id=incident.id, kind="resolved",

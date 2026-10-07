@@ -1,18 +1,20 @@
-"""Background sweeps: rollups, rules, incident detection/recovery.
+"""Background sweeps: rollups, rules, incidents, LLM loops, SLO refresh.
 
 One asyncio task started by the app lifespan; every collect interval it runs
-the cheap deterministic pipeline. LLM periodic analysis hooks in at M5 behind
-its own interval + budget guardrails (config.llm_*).
+the cheap deterministic pipeline. LLM periodic analysis runs behind its own
+interval + budget guardrails (config.llm_*).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import traceback
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from . import detection, incidents, metrics
+from . import detection, incidents, metrics, postmortem
 from .config import settings
 from .db import SessionLocal
 from .llm import LLMClient
@@ -24,6 +26,7 @@ log = logging.getLogger("sre-platform.sweeper")
 
 # Per-app LLM analysis state lives in memory; interval from settings (§2 guardrails).
 _last_llm_analysis: dict[int, float] = {}
+_last_slo_refresh = 0.0
 
 
 async def sweep_loop() -> None:
@@ -37,14 +40,29 @@ async def sweep_loop() -> None:
 
 
 def _llm_ready(app_id: int) -> bool:
-    import time
-
     now = time.time()
     last = _last_llm_analysis.get(app_id, 0.0)
     if now - last >= max(60, settings.llm_analysis_interval_s):
         _last_llm_analysis[app_id] = now
         return True
     return False
+
+
+def _refresh_slo(db: Session) -> None:
+    """Refresh error-budget states at most once per 5 minutes."""
+    global _last_slo_refresh
+    now = time.time()
+    if now - _last_slo_refresh < 300:
+        return
+    _last_slo_refresh = now
+    from .models import SLO
+
+    try:
+        for slo_row in db.scalars(select(SLO).where(SLO.enabled == True)).all():  # noqa: E712
+            postmortem.compute_slo_status(db, slo_row)
+        db.flush()
+    except Exception:
+        log.warning("slo refresh failed", exc_info=True)
 
 
 def _run_sweep() -> None:
@@ -86,6 +104,21 @@ def _run_sweep() -> None:
                 except Exception:
                     continue
         recovered = incidents.check_recovery(db)
+        # Auto-postmortem for freshly resolved incidents (spec §20)
+        if recovered:
+            client0 = LLMClient()
+            resolved = db.scalars(
+                select(Incident).where(
+                    Incident.status == IncidentStatus.resolved,
+                    Incident.resolved_at.is_not(None),
+                ).order_by(Incident.resolved_at.desc()).limit(5)
+            ).all()
+            for incident in resolved:
+                try:
+                    postmortem.generate_postmortem(db, incident, client0)
+                except Exception:
+                    log.warning("postmortem generation failed for incident %s", incident.id, exc_info=True)
+        _refresh_slo(db)
         db.commit()
         if fired or opened or recovered or rolled:
             log.info(
