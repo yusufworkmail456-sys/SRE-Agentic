@@ -14,8 +14,27 @@
   <div class="card"><h3>Dependencies</h3><div class="big">{{ app.dependencies|length }}</div></div>
 </div>
 
-<h2>Health &amp; RED metrics</h2>
+{% if app.endpoints %}
+<h2>Network</h2>
 <div class="grid">
+  {% for e in app.endpoints %}
+  <div class="card">
+    <h3>{{ e.domain or e.url }}</h3>
+    <div class="big">
+      {% if e.tls_expires_at %}
+        {% set days = ((e.tls_expires_at - now_utc()).days) %}
+        {% if days > 21 %}<span class="ok-text">SSL ok</span>
+        {% elif days > 7 %}<span class="warn-text">SSL {{ days }}d</span>
+        {% else %}<span class="err">SSL {{ days }}d</span>{% endif %}
+      {% else %}<span class="muted">no TLS info</span>{% endif %}
+    </div>
+    <div class="muted">{{ e.url }}{% if e.tls_expires_at %} · exp {{ e.tls_expires_at.strftime("%Y-%m-%d") }}{% endif %}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<h2>Health &amp; RED metrics</h2><div class="grid">
   <div class="card">
     <h3>Request rate</h3>
     <div class="big">{{ "%.2f"|format(latest.req_rate) if latest and latest.req_rate is not none else "—" }}</div>
@@ -183,6 +202,47 @@
   {% endfor %}
 </table>
 {% else %}<p class="muted">No postmortems yet — generated automatically when an incident resolves.</p>{% endif %}
+
+<h2>Deployments</h2>
+{% if deployments %}
+<table>
+  <tr><th>SHA</th><th>Branch</th><th>Method</th><th>CI</th><th>Regression</th><th>When</th><th>Actions</th></tr>
+  {% for d in deployments %}
+  <tr>
+    <td class="muted"><code>{{ (d.sha or "—")[:8] }}</code></td>
+    <td class="muted">{{ d.branch or "—" }}</td>
+    <td class="muted">{{ d.method or "—" }}</td>
+    <td>
+      {% if d.ci_state %}<span class="pill {{ 'healthy' if d.ci_state=='success' else ('down' if d.ci_state=='failure' else 'unknown') }}">{{ d.ci_state }}</span>
+      {% else %}<span class="muted">—</span>{% endif %}
+    </td>
+    <td>
+      {% if d.regression %}<span class="pill down">REGRESSION</span>
+      {% elif d.regression_checked %}<span class="pill healthy">ok</span>
+      {% else %}<span class="muted">unchecked</span>{% endif %}
+    </td>
+    <td class="muted">{{ d.deployed_at.strftime("%m-%d %H:%M") }}</td>
+    <td>
+      <button hx-post="/api/deployments/{{ d.id }}/regression-check" hx-swap="none">verify</button>
+      {% if not d.rollback_of_id %}
+      <button hx-post="/api/deployments/{{ d.id }}/rollback" hx-confirm="Rollback deployment {{ (d.sha or '')[:8] }}? Approval + agent execution required." hx-swap="none">rollback</button>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="muted">Rollback/verify: verify runs instantly; rollback stages a high-risk action (approval + agent allowlist required).</p>
+{% else %}<p class="muted">No deployments recorded — POST /api/apps/{{ app.slug }}/deployments or auto-detected.</p>{% endif %}
+
+<h2>DORA metrics (30d)</h2>
+{% if dora %}
+<div class="grid">
+  <div class="card"><h3>Deploy freq</h3><div class="big">{{ dora.deployment_frequency_per_day }}/d</div><div class="muted">{{ dora.deployments }} deploys</div></div>
+  <div class="card"><h3>Change failure rate</h3><div class="big {{ 'err' if dora.change_failure_rate and dora.change_failure_rate > 0.2 else '' }}">{{ "%.0f%%"|format(dora.change_failure_rate * 100) if dora.change_failure_rate is not none else "—" }}</div><div class="muted">{{ dora.failed_deployments }} failed</div></div>
+  <div class="card"><h3>Lead time</h3><div class="big">{{ dora.lead_time_median_min ~ "m" if dora.lead_time_median_min is not none else "—" }}</div><div class="muted">median commit → deploy</div></div>
+  <div class="card"><h3>MTTR</h3><div class="big">{{ "%.0fs"|format(dora.mttr_avg_s) if dora.mttr_avg_s is not none else "—" }}</div><div class="muted">{{ dora.incidents_resolved }} incidents resolved</div></div>
+</div>
+{% else %}<p class="muted">No DORA data yet.</p>{% endif %}
 
 <h2>Timeline</h2>
 {% if timeline %}

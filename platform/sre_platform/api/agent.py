@@ -68,6 +68,7 @@ class IngestRequest(BaseModel):
     red: list[dict] | None = None
     health_checks: list[dict] | None = None
     logs: list[dict] | None = None
+    containers: dict | None = None  # {"metrics": [...], "states": [...]}
 
 
 @router.post("/ingest")
@@ -94,6 +95,10 @@ def ingest(
         from ..logstore import store_log_batches
 
         result["logs_stored"] = store_log_batches(db, server, req.logs)
+    if req.containers:
+        from ..containerops import apply_container_states
+
+        result["containers"] = apply_container_states(db, server, req.containers)
     db.commit()
     return result
 

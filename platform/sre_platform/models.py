@@ -408,7 +408,11 @@ class Deployment(Base, TimestampMixin):
     before_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     after_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     regression: Mapped[bool] = mapped_column(Boolean, default=False)
+    regression_checked: Mapped[bool] = mapped_column(Boolean, default=False)
     rollback_of_id: Mapped[int | None] = mapped_column(ForeignKey("deployment.id"))
+    pr_url: Mapped[str | None] = mapped_column(String(512))
+    ci_state: Mapped[str | None] = mapped_column(String(32))  # pending/success/failure/unknown
+    ci_url: Mapped[str | None] = mapped_column(String(512))
 
 
 class Commit(Base, TimestampMixin):

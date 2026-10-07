@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from .api import agent as agent_api
 from .api import apps as apps_api
 from .api import ask as ask_api
+from .api import ops as ops_api
 from .api import postmortem as pm_api
 from .api import repo as repo_api
 from .api import repo_ui as repo_ui_api
@@ -34,6 +35,12 @@ from .services import confirm_application, slugify, unique_slug
 from . import sweeper
 
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def _now_utc():
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC)
 
 
 def _repo_summary(db, app_row) -> dict:
@@ -88,6 +95,9 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         Base.metadata.create_all(engine)
+        from .migrations import ensure_schema
+
+        ensure_schema(engine)
         _ensure_bootstrap_admin()
         task = asyncio.create_task(sweeper.sweep_loop())
         yield
@@ -95,9 +105,11 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
     templates = Jinja2Templates(directory=str(BASE_DIR / "ui" / "templates"))
+    templates.env.globals["now_utc"] = _now_utc
     app.include_router(apps_api.router)
     app.include_router(agent_api.router)
     app.include_router(ask_api.router)
+    app.include_router(ops_api.router)
     app.include_router(pm_api.router)
     app.include_router(repo_api.router)
     app.include_router(repo_ui_api.router)
@@ -278,11 +290,30 @@ def create_app() -> FastAPI:
         db.commit()
         return RedirectResponse("/discovery", status_code=303)
 
+    @app.get("/topology", response_class=HTMLResponse)
+    def topology_page(request: Request, db: Session = Depends(get_db)):
+        """Service/dependency topology (spec §10)."""
+        from .deps import topology_for_apps
+
+        topo = topology_for_apps(db)
+        return templates.TemplateResponse(
+            request,
+            "topology.html",
+            {
+                "settings": settings,
+                "nodes": topo["nodes"],
+                "edges": topo["edges"],
+                "app_names": topo["app_names"],
+            },
+        )
+
     @app.get("/applications/{slug}", response_class=HTMLResponse)
     def application_detail(slug: str, request: Request, db: Session = Depends(get_db)):
         from .logstore import window_error_counts
         from .metrics import latest_points
         from .models import LogBatch, Postmortem, Repository, SLO
+        from .models import Deployment
+        from .dora import dora_for_app
         from .postmortem import budget_context_for_recommendations, slo_summary_for_app
 
         app_row = db.scalar(select(Application).where(Application.slug == slug))
@@ -333,6 +364,13 @@ def create_app() -> FastAPI:
                     .order_by(Finding.last_seen.desc())
                     .limit(20)
                 ).all(),
+                "deployments": db.scalars(
+                    select(Deployment)
+                    .where(Deployment.application_id == app_row.id)
+                    .order_by(Deployment.deployed_at.desc())
+                    .limit(10)
+                ).all(),
+                "dora": dora_for_app(db, app_row.id, days=30),
                 "incidents": db.scalars(
                     select(Incident)
                     .where(Incident.application_id == app_row.id)

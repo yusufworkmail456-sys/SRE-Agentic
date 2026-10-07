@@ -135,6 +135,20 @@ def _sync_workload(db: Session, app_row: Application, fp: dict) -> Workload:
     instance.listen_port = ports[0] if ports else instance.listen_port
     instance.listen_addr = "0.0.0.0" if ports else instance.listen_addr
     instance.alive = True
+    # docker fingerprints carry per-container detail (spec §6 containerized)
+    for c in fp.get("containers") or []:
+        cid = (c.get("id") or "")[:12]
+        if not cid:
+            continue
+        cinst = db.scalar(
+            select(RuntimeInstance).where(RuntimeInstance.container_id == cid)
+        )
+        if cinst is None:
+            cinst = RuntimeInstance(workload_id=workload.id, container_id=cid)
+            db.add(cinst)
+        cinst.alive = c.get("state") == "running"
+        cinst.cmd = f"image {c.get('image', '')}"[:500] if c.get("image") else cinst.cmd
+        cinst.listen_port = (c.get("ports") or [None])[0] if c.get("ports") else cinst.listen_port
     return workload
 
 

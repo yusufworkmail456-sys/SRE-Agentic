@@ -12,8 +12,10 @@ from pathlib import Path
 
 import psutil
 
+from . import dockercol
 from .config import AgentConfig, load_config
 from .discovery import discover, hostname
+from .executor import execute_action
 from .ingest import CoreClient
 from .logcol import file_batch, journald_batch
 from .red import collect_nginx_red
@@ -68,13 +70,25 @@ class Agent:
                 payload = {"server_id": self.server_id, "ts": time.time()}
                 now = time.time()
                 if now - last_discovery >= self.cfg.discovery_interval_s:
-                    payload["discovery"] = [f.to_dict() for f in discover()]
+                    fps = [f.to_dict() for f in discover()]
+                    fps += dockercol.container_fingerprints()
+                    payload["discovery"] = fps
                     last_discovery = now
                 payload["metrics"] = {"server": collect_server_metrics()}
                 payload["red"] = collect_nginx_red(window_s=self.cfg.collect_interval_s * 10)
                 payload["logs"] = self._collect_logs()
                 payload["health_checks"] = self._probe_listening_ports()
+                containers = dockercol.list_containers()
+                if containers:
+                    payload["containers"] = {
+                        "metrics": dockercol.container_metrics(containers),
+                        "states": [
+                            {"id": c.id, "name": c.name, "state": c.state, "status": c.status}
+                            for c in containers
+                        ],
+                    }
                 self.client.ingest(payload)
+                self._poll_and_execute()
             except Exception as exc:  # never die on a bad cycle
                 log.warning("cycle failed: %s", exc)
                 # 401 = our token/server row is gone (fresh core DB). Re-bootstrap.
@@ -87,6 +101,28 @@ class Agent:
                     except Exception:
                         pass
             time.sleep(self.cfg.collect_interval_s)
+
+    def _poll_and_execute(self) -> None:
+        """Poll approved actions; run ONLY what the local allowlist permits (§18)."""
+        if not self.cfg.allow_exec:
+            return
+        try:
+            actions = self.client.poll_actions()
+        except Exception as exc:
+            log.warning("action poll failed: %s", exc)
+            return
+        for item in actions:
+            result = execute_action(
+                action_id=item.get("id", 0),
+                action=item.get("action", ""),
+                target=item.get("target", ""),
+                nonce=item.get("nonce"),
+                allowlist=self.cfg.exec_allowlist,
+            )
+            try:
+                self.client.report_action(item["id"], result)
+            except Exception as exc:
+                log.warning("action result report failed: %s", exc)
 
     def _ensure_registered(self) -> None:
         if self.server_id:
@@ -105,7 +141,7 @@ class Agent:
 
     # -------------------------------------------------- probes
     def _collect_logs(self) -> list[dict]:
-        """Journal batches for discovered service workloads + marked log files."""
+        """Journal batches for discovered service workloads + marked log files + docker logs."""
         batches: list[dict] = []
         seen: set[str] = set()
         try:
@@ -127,7 +163,18 @@ class Agent:
                         batch = file_batch(str(candidate))
                         if batch:
                             batches.append(batch)
-        return batches[:8]  # bounded per cycle
+        # docker container logs (spec §6 containerized)
+        try:
+            for c in dockercol.list_containers():
+                if c.state != "running" or c.name in seen:
+                    continue
+                seen.add(c.name)
+                batch = dockercol.container_log_batch(c.name)
+                if batch:
+                    batches.append(batch)
+        except Exception as exc:
+            log.warning("docker log collection failed: %s", exc)
+        return batches[:12]  # bounded per cycle
 
     def _probe_listening_ports(self) -> list[dict]:
         """Probe local HTTP ports as health checks (minimal M2 scope)."""

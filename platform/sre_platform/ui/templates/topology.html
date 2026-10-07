@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Topology — SRE Platform{% endblock %}
+{% block content %}
+<h2>Service Topology</h2>
+<p class="muted">Application → dependency map (spec §10). Edges show probe status; lengkap via <code>GET /api/topology</code>.</p>
+
+<div class="card" style="padding:18px">
+  {% if nodes %}
+  <svg viewBox="0 0 800 {{ (nodes|length) * 60 + 100 }}" style="width:100%;height:auto">
+    {%- for n in nodes -%}
+      {%- set y = 40 + loop.index0 * 60 -%}
+      {%- set pill = {'healthy':'#16a34a','degraded':'#d97706','down':'#dc2626','unknown':'#9ca3af'}[n.status] -%}
+      <a href="/applications/{{ n.slug }}">
+        <rect x="180" y="{{ y - 18 }}" width="240" height="36" rx="8" fill="#ffffff" stroke="{{ pill }}" stroke-width="2"/>
+        <text x="300" y="{{ y + 5 }}" text-anchor="middle" font-size="14" fill="#111">{{ n.name }}</text>
+      </a>
+      <text x="300" y="{{ y + 30 }}" text-anchor="middle" font-size="10" fill="#6b7280">{{ n.model }} · {{ n.environment }}</text>
+    {%- endfor -%}
+  </svg>
+  {% else %}
+  <p class="muted">Belum ada application. Confirm discovery dulu di halaman Discovery.</p>
+  {% endif %}
+</div>
+
+<h2>Dependency probes</h2>
+<table>
+  <tr><th>From</th><th>Dependency</th><th>Kind</th><th>Criticality</th><th>Last probe</th></tr>
+  {% for e in edges %}
+  <tr>
+    <td class="muted">{{ app_names.get(e.from, e.from) }}</td>
+    <td>{{ e.name }}{% if e.to %} <span class="muted">→ {{ app_names.get(e.to, e.to) }}</span>{% endif %}</td>
+    <td class="muted">{{ e.kind }}</td>
+    <td class="muted">{{ e.criticality }}</td>
+    <td>
+      {% if e.last_probe %}
+        {% if e.last_probe.ok == true %}<span class="pill healthy">reachable</span>
+        {% elif e.last_probe.ok == false %}<span class="pill down">unreachable</span>
+        {% else %}<span class="pill unknown">{{ e.last_probe.reason or "not probed" }}</span>{% endif %}
+      {% else %}<span class="muted">not probed</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+  {% if not edges %}<tr><td colspan="5" class="muted">No dependencies registered — POST /api/apps/{slug}/dependencies</td></tr>{% endif %}
+</table>
+{% endblock %}

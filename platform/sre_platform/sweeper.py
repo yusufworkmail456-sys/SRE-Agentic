@@ -10,6 +10,7 @@ import asyncio
 import logging
 import time
 import traceback
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,7 +19,7 @@ from . import detection, incidents, metrics, postmortem
 from .config import settings
 from .db import SessionLocal
 from .llm import LLMClient
-from .models import Application, Incident, IncidentStatus
+from .models import Application, Deployment, Incident, IncidentStatus
 from .rules_extra import rule_log_error_spike, rule_ssl_expiry
 from . import investigation
 
@@ -72,14 +73,21 @@ def _run_sweep() -> None:
         apps = db.scalars(select(Application)).all()
         fired: list[str] = []
         client = LLMClient()
+        from .deps import probe_all_for_app
+        from .forecast import rule_capacity_forecast
+
         for app_row in apps:
             if app_row.confirmed:
                 fired += detection.run_rules_for_app(db, app_row)
-                for extra_rule in (rule_ssl_expiry, rule_log_error_spike):
+                for extra_rule in (rule_ssl_expiry, rule_log_error_spike, rule_capacity_forecast):
                     try:
                         extra_rule(db, app_row)
                     except Exception:
                         continue
+                try:
+                    probe_all_for_app(db, app_row)
+                except Exception:
+                    log.debug("dep probe failed for %s", app_row.slug, exc_info=True)
                 if client.enabled and _llm_ready(app_row.id):
                     try:
                         ai_findings = investigation.llm_periodic_analysis(db, app_row, client)
@@ -119,6 +127,35 @@ def _run_sweep() -> None:
                 except Exception:
                     log.warning("postmortem generation failed for incident %s", incident.id, exc_info=True)
         _refresh_slo(db)
+        # M9/M10: CI status watch + regression checks on recent deployments
+        try:
+            from .ciwatch import watch_all
+
+            ci_checked = watch_all(db)
+        except Exception:
+            ci_checked = 0
+            log.debug("ci watch failed", exc_info=True)
+        try:
+            recent_deploys = db.scalars(
+                select(Deployment)
+                .where(
+                    Deployment.regression_checked == False,  # noqa: E712
+                    Deployment.deployed_at >= datetime.now(UTC) - timedelta(minutes=120),
+                )
+                .limit(10)
+            ).all()
+            from .deployer import regression_check
+
+            regressions = 0
+            for deployment in recent_deploys:
+                try:
+                    result = regression_check(db, deployment)
+                    if result.get("regression"):
+                        regressions += 1
+                except Exception:
+                    continue
+        except Exception:
+            regressions = 0
         db.commit()
         if fired or opened or recovered or rolled:
             log.info(
