@@ -33,7 +33,7 @@
   {% for row in attention %}
   <tr>
     <td><span class="pill {{ row.app.status.value }}">{{ row.app.status.value }}</span></td>
-    <td><a href="/applications/{{ row.app.slug }}">{{ row.app.name }}</a>
+    <td><a href="{{ u('/applications') }}/{{ row.app.slug }}">{{ row.app.name }}</a>
         <div class="muted">{{ row.app.environment }} · {{ row.app.deployment_model.value }}</div></td>
     <td>{{ "%.1f%%"|format(row.err_rate * 100) if row.err_rate is not none else "—" }}</td>
     <td>{{ "%.0fms"|format(row.p95) if row.p95 is not none else "—" }}</td>
@@ -53,8 +53,8 @@
   <tr>
     <td><span class="pill {{ row.app.status.value }}">{{ row.app.status.value }}</span></td>
     <td>
-      {% if row.app.confirmed %}<a href="/applications/{{ row.app.slug }}">{{ row.app.name }}</a>
-      {% else %}<a href="/discovery">{{ row.app.name }}</a> <span class="pill unknown">unconfirmed</span>{% endif %}
+      {% if row.app.confirmed %}<a href="{{ u('/applications') }}/{{ row.app.slug }}">{{ row.app.name }}</a>
+      {% else %}<a href="{{ u('/discovery') }}">{{ row.app.name }}</a> <span class="pill unknown">unconfirmed</span>{% endif %}
       <div class="muted">{{ row.app.server.hostname if row.app.server else "external" }}</div>
     </td>
     <td class="muted">{{ row.app.environment }}</td>

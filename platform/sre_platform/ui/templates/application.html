@@ -100,7 +100,7 @@
   <div id="ask-log">
     {% if not settings.llm_enabled %}<p class="muted">LLM disabled — answers will be facts-only until SRE_LLM_* is configured.</p>{% endif %}
   </div>
-  <form hx-post="/api/ask/{{ app.slug }}/html" hx-target="#ask-log" hx-swap="beforeend" style="display:flex;gap:8px;margin-top:8px">
+  <form hx-post="{{ u('/api/ask') }}/{{ app.slug }}/html" hx-target="#ask-log" hx-swap="beforeend" style="display:flex;gap:8px;margin-top:8px">
     <input name="question" placeholder="Why is this app slow? What changed recently?" style="flex:1">
     <button type="submit">Ask</button>
   </form>
@@ -142,11 +142,11 @@
       {% endfor %}
     </table>
     {% else %}<p class="muted">Belum ada commit ter-index — klik Sync.</p>{% endif %}
-    <button hx-post="/repo/{{ app.slug }}/sync" hx-target="#repo-sync-msg" style="margin-top:8px">Sync now</button>
+    <button hx-post="{{ u('/repo') }}/{{ app.slug }}/sync" hx-target="#repo-sync-msg" style="margin-top:8px">Sync now</button>
     <span id="repo-sync-msg" class="muted"></span>
   {% else %}
     <p class="muted">Belum ada repository terhubung.</p>
-    <form hx-post="/repo/{{ app.slug }}/link" hx-target="#repo-sync-msg" style="display:flex;gap:8px;margin-top:6px">
+    <form hx-post="{{ u('/repo') }}/{{ app.slug }}/link" hx-target="#repo-sync-msg" style="display:flex;gap:8px;margin-top:6px">
       <input name="url" placeholder="https://github.com/user/repo" style="flex:1">
       <input name="branch" value="main" style="width:90px">
       <button type="submit">Link repo</button>
@@ -197,7 +197,7 @@
     <td class="muted">{{ p.generated_by }}</td>
     <td class="muted">{{ p.reviewed_by or "—" }}</td>
     <td class="muted">{{ "yes" if p.published else "draft" }}</td>
-    <td><a href="/api/postmortems/{{ p.id }}/export.md">md</a></td>
+    <td><a href="{{ u('/api/postmortems') }}/{{ p.id }}/export.md">md</a></td>
   </tr>
   {% endfor %}
 </table>
@@ -223,9 +223,9 @@
     </td>
     <td class="muted">{{ d.deployed_at.strftime("%m-%d %H:%M") }}</td>
     <td>
-      <button hx-post="/api/deployments/{{ d.id }}/regression-check" hx-swap="none">verify</button>
+      <button hx-post="{{ u('/api/deployments') }}/{{ d.id }}/regression-check" hx-swap="none">verify</button>
       {% if not d.rollback_of_id %}
-      <button hx-post="/api/deployments/{{ d.id }}/rollback" hx-confirm="Rollback deployment {{ (d.sha or '')[:8] }}? Approval + agent execution required." hx-swap="none">rollback</button>
+      <button hx-post="{{ u('/api/deployments') }}/{{ d.id }}/rollback" hx-confirm="Rollback deployment {{ (d.sha or '')[:8] }}? Approval + agent execution required." hx-swap="none">rollback</button>
       {% endif %}
     </td>
   </tr>

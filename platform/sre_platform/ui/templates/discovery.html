@@ -20,7 +20,7 @@
       {% for w in a.workloads %}{% for i in w.instances %}{{ i.listen_port or "" }}{% endfor %}{% endfor %}
     </td>
     <td>
-      <form method="post" action="/discovery/{{ a.slug }}/confirm" style="display:flex;gap:6px">
+      <form method="post" action="{{ u('/discovery') }}/{{ a.slug }}/confirm" style="display:flex;gap:6px">
         <input name="name" value="{{ a.name }}" style="width:150px">
         <input name="environment" value="{{ a.environment }}" style="width:70px">
         <input name="owner" placeholder="owner" style="width:90px">
@@ -39,7 +39,7 @@
   {% for a in apps %}
   <tr>
     <td><span class="pill {{ a.status.value }}">{{ a.status.value }}</span></td>
-    <td><a href="/applications/{{ a.slug }}">{{ a.name }}</a></td>
+    <td><a href="{{ u('/applications') }}/{{ a.slug }}">{{ a.name }}</a></td>
     <td class="muted">{{ a.environment }}</td>
     <td class="muted">{{ a.deployment_model.value }}</td>
     <td class="muted">{{ a.discovery.value }}</td>

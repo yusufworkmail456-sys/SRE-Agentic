@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 9141
     secret_key: str = "change-me"
+    # Public mount prefix (nginx: location /sre/ -> proxy .../). Links in the UI
+    # are built with this prefix so they stay inside /sre/ instead of escaping
+    # to the default vhost root. Empty string = app served at domain root.
+    url_prefix: str = "/sre"
 
     # Agent fleet defaults
     collect_default_interval_s: int = 30

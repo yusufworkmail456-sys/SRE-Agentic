@@ -106,6 +106,13 @@ def create_app() -> FastAPI:
     app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
     templates = Jinja2Templates(directory=str(BASE_DIR / "ui" / "templates"))
     templates.env.globals["now_utc"] = _now_utc
+
+    def _u(path: str) -> str:
+        """Prefix an app-relative path with the public mount prefix (/sre)."""
+        prefix = (settings.url_prefix or "").rstrip("/")
+        return f"{prefix}{path}" if prefix else path
+
+    templates.env.globals["u"] = _u
     app.include_router(apps_api.router)
     app.include_router(agent_api.router)
     app.include_router(ask_api.router)
@@ -288,7 +295,7 @@ def create_app() -> FastAPI:
             db, app_row, environment=environment or None, owner=owner or None
         )
         db.commit()
-        return RedirectResponse("/discovery", status_code=303)
+        return RedirectResponse(_u("/discovery"), status_code=303)
 
     @app.get("/topology", response_class=HTMLResponse)
     def topology_page(request: Request, db: Session = Depends(get_db)):

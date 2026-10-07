@@ -46,9 +46,9 @@
 </head>
 <body>
 <header>
-  <a href="/">SRE&nbsp;Platform</a>
-  <a href="/discovery" class="muted">Discovery</a>
-  <a href="/topology" class="muted">Topology</a>
+  <a href="{{ u('/') }}">SRE&nbsp;Platform</a>
+  <a href="{{ u('/discovery') }}" class="muted">Discovery</a>
+  <a href="{{ u('/topology') }}" class="muted">Topology</a>
   <span class="muted">Agentic Application Reliability</span>
 </header>
 <main>{% block content %}{% endblock %}</main>
