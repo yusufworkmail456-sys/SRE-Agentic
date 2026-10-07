@@ -109,6 +109,32 @@
 <p class="muted">Last 60 min totals: {{ log_counts.get("ERROR", 0) + log_counts.get("CRITICAL", 0) }} error lines</p>
 {% else %}<p class="muted">No log batches yet.</p>{% endif %}
 
+<h2>Repository</h2>
+<div class="card">
+  {% if repo_info.linked %}
+    <p><strong>{{ repo_info.url }}</strong> <span class="muted">({{ repo_info.branch }})</span>
+       {% if repo_info.token_configured %}<span class="pill healthy">own token</span>{% else %}<span class="pill unknown">server credential</span>{% endif %}</p>
+    {% if repo_info.recent_commits %}
+    <table style="margin-top:8px">
+      <tr><th>SHA</th><th>Author</th><th>Message</th><th>Date</th></tr>
+      {% for c in repo_info.recent_commits %}
+      <tr><td class="muted"><code>{{ c.sha }}</code></td><td>{{ c.author or "—" }}</td>
+          <td>{{ c.message }}</td><td class="muted">{{ c.date[:16] if c.date else "—" }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}<p class="muted">Belum ada commit ter-index — klik Sync.</p>{% endif %}
+    <button hx-post="/repo/{{ app.slug }}/sync" hx-target="#repo-sync-msg" style="margin-top:8px">Sync now</button>
+    <span id="repo-sync-msg" class="muted"></span>
+  {% else %}
+    <p class="muted">Belum ada repository terhubung.</p>
+    <form hx-post="/repo/{{ app.slug }}/link" hx-target="#repo-sync-msg" style="display:flex;gap:8px;margin-top:6px">
+      <input name="url" placeholder="https://github.com/user/repo" style="flex:1">
+      <input name="branch" value="main" style="width:90px">
+      <button type="submit">Link repo</button>
+    </form>
+  {% endif %}
+</div>
+
 <h2>Findings</h2>
 {% if findings %}
 <table>

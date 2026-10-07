@@ -29,3 +29,5 @@ include = ["sre_platform*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Tests must never touch the production SQLite file: override data_dir + db path.
+filterwarnings = ["ignore::DeprecationWarning"]

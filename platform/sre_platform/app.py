@@ -16,6 +16,8 @@ from .api import agent as agent_api
 from .api import apps as apps_api
 from .api import ask as ask_api
 from .api import postmortem as pm_api
+from .api import repo as repo_api
+from .api import repo_ui as repo_ui_api
 from .config import settings
 from .db import engine, get_db
 from .models import (
@@ -31,6 +33,32 @@ from .services import confirm_application, slugify, unique_slug
 from . import sweeper
 
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def _repo_summary(db, app_row) -> dict:
+    """Repo info for the app-page template (linked URL/branch/commits)."""
+    from .models import Commit, Repository
+
+    repo = db.scalar(select(Repository).where(Repository.application_id == app_row.id))
+    if repo is None:
+        return {"linked": False}
+    commits = db.scalars(
+        select(Commit)
+        .where(Commit.repository_id == repo.id)
+        .order_by(Commit.committed_at.desc().nullslast())
+        .limit(8)
+    ).all()
+    return {
+        "linked": True,
+        "url": repo.url,
+        "branch": repo.default_branch,
+        "token_configured": bool(repo.token_ref),
+        "recent_commits": [
+            {"sha": c.sha[:8], "author": c.author, "message": (c.message or "")[:90],
+             "date": c.committed_at.isoformat() if c.committed_at else None}
+            for c in commits
+        ],
+    }
 
 
 def _ensure_bootstrap_admin() -> None:
@@ -70,6 +98,8 @@ def create_app() -> FastAPI:
     app.include_router(agent_api.router)
     app.include_router(ask_api.router)
     app.include_router(pm_api.router)
+    app.include_router(repo_api.router)
+    app.include_router(repo_ui_api.router)
 
     @app.get("/healthz")
     def healthz(db: Session = Depends(get_db)) -> dict:
@@ -250,7 +280,7 @@ def create_app() -> FastAPI:
     def application_detail(slug: str, request: Request, db: Session = Depends(get_db)):
         from .logstore import window_error_counts
         from .metrics import latest_points
-        from .models import LogBatch, Postmortem, SLO
+        from .models import LogBatch, Postmortem, Repository, SLO
         from .postmortem import budget_context_for_recommendations, slo_summary_for_app
 
         app_row = db.scalar(select(Application).where(Application.slug == slug))
@@ -286,6 +316,7 @@ def create_app() -> FastAPI:
                 "log_counts": window_error_counts(db, app_row.id, minutes=60),
                 "slos": slo_summary_for_app(db, app_row.id),
                 "budget_note": budget_context_for_recommendations(db, app_row),
+                "repo_info": _repo_summary(db, app_row),
                 "postmortems": db.scalars(
                     select(Postmortem)
                     .where(Postmortem.incident_id.in_(

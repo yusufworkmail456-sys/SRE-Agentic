@@ -183,6 +183,26 @@ def build_context(db: Session, app_row: Application, window_minutes: int = 120) 
             for t in timeline
         ],
     }
+    # Repo awareness for Ask Agent (spec §15)
+    try:
+        from .git_tools import inspect as git_inspect
+
+        repo_summary = git_inspect(db, app_row, "structure")
+        if repo_summary.get("ok"):
+            context["repository"] = {
+                "ref": "repository:structure",
+                "branch": repo_summary.get("branch"),
+                "tree_top": repo_summary.get("tree_top", [])[:60],
+                "manifests": {
+                    name: content[:1200]
+                    for name, content in (repo_summary.get("manifests") or {}).items()
+                },
+                "recent_commits": [
+                    {**c, "ref": f"commit:{c['sha']}"} for c in repo_summary.get("recent_commits", [])
+                ],
+            }
+    except Exception:
+        pass
     return context
 
 

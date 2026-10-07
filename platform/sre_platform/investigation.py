@@ -293,6 +293,23 @@ def _mini_pack(db: Session, app_row: Application, max_chars: int = 8000) -> dict
         ],
         "open_findings": [],
     }
+    # Repo awareness (spec §15): curated structure + manifests when linked.
+    try:
+        from .git_tools import inspect as git_inspect
+
+        repo_summary = git_inspect(db, app_row, "structure")
+        if repo_summary.get("ok"):
+            pack["repository"] = {
+                "ref": "repository:structure",
+                "branch": repo_summary.get("branch"),
+                "tree_top": repo_summary.get("tree_top", [])[:40],
+                "manifests": list((repo_summary.get("manifests") or {}).keys()),
+                "recent_commits": [
+                    {**c, "ref": f"commit:{c['sha']}"} for c in repo_summary.get("recent_commits", [])[:8]
+                ],
+            }
+    except Exception:
+        pass
     import json as _json
 
     if len(_json.dumps(pack, default=str)) > max_chars:

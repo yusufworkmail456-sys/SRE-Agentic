@@ -23,12 +23,17 @@ class LLMUnavailable(Exception):
 class LLMClient:
     def __init__(self, base_url: str | None = None, api_key: str | None = None, model: str | None = None):
         # None = inherit from settings; explicit "" = force-disabled (tests, opt-out)
+        self._explicit_config = base_url is not None or api_key is not None
         self.base_url = settings.llm_base_url if base_url is None else base_url.rstrip("/")
         self.api_key = settings.llm_api_key if api_key is None else api_key
         self.model = model or settings.llm_model
 
     @property
     def enabled(self) -> bool:
+        # Explicit construction args override the global SRE_LLM_ENABLED switch
+        # (unit tests pass fake base_url/api_key without env config).
+        if self._explicit_config:
+            return bool(self.base_url and self.api_key)
         return bool(settings.llm_enabled and self.base_url and self.api_key)
 
     def chat(self, system: str, user: str, max_tokens: int = 1200, timeout_s: float = 60.0) -> str:
