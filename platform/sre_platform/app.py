@@ -4,6 +4,8 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import asyncio
+
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -14,8 +16,17 @@ from .api import agent as agent_api
 from .api import apps as apps_api
 from .config import settings
 from .db import engine, get_db
-from .models import Application, Base, Finding, Incident, Server, TimelineEvent
+from .models import (
+    Application,
+    Base,
+    Finding,
+    Incident,
+    MetricPoint,
+    Server,
+    TimelineEvent,
+)
 from .services import confirm_application, slugify, unique_slug
+from . import sweeper
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -47,7 +58,9 @@ def create_app() -> FastAPI:
     async def lifespan(_app: FastAPI):
         Base.metadata.create_all(engine)
         _ensure_bootstrap_admin()
+        task = asyncio.create_task(sweeper.sweep_loop())
         yield
+        task.cancel()
 
     app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
     templates = Jinja2Templates(directory=str(BASE_DIR / "ui" / "templates"))
@@ -155,15 +168,32 @@ def create_app() -> FastAPI:
 
     @app.get("/applications/{slug}", response_class=HTMLResponse)
     def application_detail(slug: str, request: Request, db: Session = Depends(get_db)):
+        from .metrics import latest_points
+
         app_row = db.scalar(select(Application).where(Application.slug == slug))
         if app_row is None:
             return HTMLResponse("<h1>404</h1><p>Application not found.</p>", status_code=404)
+        points = latest_points(db, app_row.id, limit=48)
+        latest = points[0] if points else None
+        server_point = (
+            db.scalars(
+                select(MetricPoint)
+                .where(MetricPoint.server_id == app_row.server_id)
+                .order_by(MetricPoint.ts.desc())
+                .limit(1)
+            ).first()
+            if app_row.server_id
+            else None
+        )
         return templates.TemplateResponse(
             request,
             "application.html",
             {
                 "settings": settings,
                 "app": app_row,
+                "latest": latest,
+                "server_point": server_point,
+                "points": list(reversed(points)),  # oldest -> newest for sparkline
                 "findings": db.scalars(
                     select(Finding)
                     .where(Finding.application_id == app_row.id)

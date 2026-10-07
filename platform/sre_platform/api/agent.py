@@ -65,6 +65,7 @@ class IngestRequest(BaseModel):
     ts: float | None = None
     discovery: list[dict] | None = None
     metrics: dict | None = None
+    red: list[dict] | None = None
     health_checks: list[dict] | None = None
     logs: list[dict] | None = None
 
@@ -82,6 +83,13 @@ def ingest(
         result["health_checks"] = apply_health_checks(db, server, req.health_checks)
     if req.metrics:
         apply_server_metrics(db, server, req.metrics)
+        from ..metrics import store_server_metrics, store_app_red
+
+        store_server_metrics(db, server, req.metrics)
+    if req.red:
+        from ..metrics import store_app_red
+
+        result["red_stored"] = store_app_red(db, server, req.red)
     # Logs are stored from M4 onward; acknowledged here so agents stay forward-compatible.
     if req.logs:
         result["logs"] = len(req.logs)

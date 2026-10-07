@@ -15,6 +15,7 @@ import psutil
 from .config import AgentConfig, load_config
 from .discovery import discover, hostname
 from .ingest import CoreClient
+from .red import collect_nginx_red
 
 log = logging.getLogger("sre-agent")
 
@@ -69,6 +70,7 @@ class Agent:
                     payload["discovery"] = [f.to_dict() for f in discover()]
                     last_discovery = now
                 payload["metrics"] = {"server": collect_server_metrics()}
+                payload["red"] = collect_nginx_red(window_s=self.cfg.collect_interval_s * 10)
                 payload["health_checks"] = self._probe_listening_ports()
                 self.client.ingest(payload)
             except Exception as exc:  # never die on a bad cycle
