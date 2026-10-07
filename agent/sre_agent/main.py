@@ -77,6 +77,15 @@ class Agent:
                 self.client.ingest(payload)
             except Exception as exc:  # never die on a bad cycle
                 log.warning("cycle failed: %s", exc)
+                # 401 = our token/server row is gone (fresh core DB). Re-bootstrap.
+                if "401" in str(exc):
+                    self.server_id = None
+                    self.state.pop("server_id", None)
+                    self._save_state()
+                    try:
+                        self._ensure_registered()
+                    except Exception:
+                        pass
             time.sleep(self.cfg.collect_interval_s)
 
     def _ensure_registered(self) -> None:
