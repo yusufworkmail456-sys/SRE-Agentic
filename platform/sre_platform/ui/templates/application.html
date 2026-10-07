@@ -63,6 +63,17 @@
 </div>
 {% endif %}
 
+<h2>Ask Agent</h2>
+<div class="card" id="ask-box">
+  <div id="ask-log">
+    {% if not settings.llm_enabled %}<p class="muted">LLM disabled — answers will be facts-only until SRE_LLM_* is configured.</p>{% endif %}
+  </div>
+  <form hx-post="/api/ask/{{ app.slug }}/html" hx-target="#ask-log" hx-swap="beforeend" style="display:flex;gap:8px;margin-top:8px">
+    <input name="question" placeholder="Why is this app slow? What changed recently?" style="flex:1">
+    <button type="submit">Ask</button>
+  </form>
+</div>
+
 <h2>Logs (recent batches)</h2>
 {% if logs %}
 <table>

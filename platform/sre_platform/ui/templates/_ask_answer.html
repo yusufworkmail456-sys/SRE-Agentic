@@ -1,0 +1,13 @@
+<div class="ask-turn">
+  <div class="ask-q"><strong>Q:</strong> {{ question }}</div>
+  <div class="ask-a">
+    <strong>A:</strong> {{ result.answer }}
+    <div class="muted">
+      confidence: {{ result.confidence }}
+      {% if result.evidence_refs %} · refs: {{ result.evidence_refs|join(", ") }}{% endif %}
+    </div>
+    {% if result.followups %}
+      <div class="muted">follow-ups: {{ result.followups|join(" · ") }}</div>
+    {% endif %}
+  </div>
+</div>

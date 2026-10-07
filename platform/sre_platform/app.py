@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from .api import agent as agent_api
 from .api import apps as apps_api
+from .api import ask as ask_api
 from .config import settings
 from .db import engine, get_db
 from .models import (
@@ -66,6 +67,7 @@ def create_app() -> FastAPI:
     templates = Jinja2Templates(directory=str(BASE_DIR / "ui" / "templates"))
     app.include_router(apps_api.router)
     app.include_router(agent_api.router)
+    app.include_router(ask_api.router)
 
     @app.get("/healthz")
     def healthz(db: Session = Depends(get_db)) -> dict:
