@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sre-platform"
+version = "0.1.0"
+description = "Agentic SRE Platform — core API + orchestrator"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.2",
+    "jinja2>=3.1",
+    "httpx>=0.27",
+    "cryptography>=42",
+    "psutil>=5.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.4"]
+postgres = ["psycopg2-binary>=2.9"]
+
+[tool.setuptools.packages.find]
+include = ["sre_platform*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

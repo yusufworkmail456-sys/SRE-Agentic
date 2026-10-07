@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Applications</h2>
+<div class="grid">
+  {% for label in ["healthy","degraded","down","unknown"] %}
+  <div class="card">
+    <h3>{{ label }}</h3>
+    <div class="big">{{ counts.get(label, 0) }}</div>
+  </div>
+  {% endfor %}
+  <div class="card">
+    <h3>total</h3>
+    <div class="big">{{ total }}</div>
+  </div>
+</div>
+
+<h2>Attention Required</h2>
+{% if attention %}
+<table>
+  <tr><th>Status</th><th>Application</th><th>Env</th><th>Model</th><th>Findings</th><th>Incidents</th></tr>
+  {% for row in attention %}
+  <tr>
+    <td><span class="pill {{ row.app.status.value }}">{{ row.app.status.value }}</span></td>
+    <td><a href="/applications/{{ row.app.slug }}">{{ row.app.name }}</a></td>
+    <td class="muted">{{ row.app.environment }}</td>
+    <td class="muted">{{ row.app.deployment_model.value }}</td>
+    <td>{{ row.findings }}</td>
+    <td>{{ row.incidents }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="muted">Nothing needs attention. No applications registered yet.</p>
+{% endif %}
+{% endblock %}

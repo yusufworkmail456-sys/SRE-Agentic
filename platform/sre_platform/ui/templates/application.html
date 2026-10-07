@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ app.name }} — SRE Platform{% endblock %}
+{% block content %}
+<h2>{{ app.name }} <span class="pill {{ app.status.value }}">{{ app.status.value }}</span></h2>
+<p class="muted">
+  {{ app.environment }} · {{ app.deployment_model.value }} · owner {{ app.owner or "—" }} ·
+  discovery {{ app.discovery.value }}{% if not app.confirmed %} · <strong>unconfirmed</strong>{% endif %}
+</p>
+
+<div class="grid">
+  <div class="card"><h3>Server</h3><div>{{ app.server.hostname if app.server else "—" }}</div></div>
+  <div class="card"><h3>Workloads</h3><div class="big">{{ app.workloads|length }}</div></div>
+  <div class="card"><h3>Endpoints</h3><div class="big">{{ app.endpoints|length }}</div></div>
+  <div class="card"><h3>Dependencies</h3><div class="big">{{ app.dependencies|length }}</div></div>
+</div>
+
+<h2>Findings</h2>
+{% if findings %}
+<table>
+  <tr><th>Sev</th><th>Title</th><th>Confidence</th><th>Status</th><th>Last seen</th></tr>
+  {% for f in findings %}
+  <tr><td><span class="pill {{ 'down' if f.severity.value=='critical' else ('degraded' if f.severity.value=='warning' else 'unknown') }}">{{ f.severity.value }}</span></td>
+      <td>{{ f.title }}</td><td class="muted">{{ f.confidence.value }}</td>
+      <td class="muted">{{ f.status.value }}</td><td class="muted">{{ f.last_seen.strftime("%Y-%m-%d %H:%M") }}</td></tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">No findings.</p>{% endif %}
+
+<h2>Incidents</h2>
+{% if incidents %}
+<table>
+  <tr><th>Status</th><th>Title</th><th>Detected</th><th>MTTR</th></tr>
+  {% for i in incidents %}
+  <tr><td class="muted">{{ i.status.value }}</td><td>{{ i.title }}</td>
+      <td class="muted">{{ i.detected_at.strftime("%Y-%m-%d %H:%M") }}</td>
+      <td class="muted">{{ (i.mttr_s ~ "s") if i.mttr_s else "—" }}</td></tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">No incidents.</p>{% endif %}
+
+<h2>Timeline</h2>
+{% if timeline %}
+<table>
+  <tr><th>Time</th><th>Kind</th><th>Event</th></tr>
+  {% for e in timeline %}
+  <tr><td class="muted">{{ e.ts.strftime("%H:%M:%S") }}</td><td class="muted">{{ e.kind }}</td><td>{{ e.summary }}</td></tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">No timeline events.</p>{% endif %}
+{% endblock %}

@@ -1,0 +1,16 @@
+[Unit]
+Description=Agentic SRE Platform (core API + UI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/SRE-Agentic/platform
+EnvironmentFile=-/root/SRE-Agentic/platform/.env
+ExecStart=/root/SRE-Agentic/platform/.venv/bin/python -m sre_platform.run
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

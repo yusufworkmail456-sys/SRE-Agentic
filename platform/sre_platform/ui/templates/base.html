@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ settings.app_name }}{% endblock %}</title>
+  <style>
+    :root { --bg:#f6f7f9; --card:#fff; --ink:#1a1f2b; --muted:#5b6472; --line:#e3e6ec;
+            --accent:#2563eb; --ok:#16a34a; --warn:#d97706; --crit:#dc2626; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink);
+           font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+    header { background:#fff; border-bottom:1px solid var(--line); padding:12px 24px;
+             display:flex; align-items:center; gap:16px; }
+    header a { color:var(--ink); text-decoration:none; font-weight:600; }
+    main { max-width:1180px; margin:0 auto; padding:20px 24px 60px; }
+    .grid { display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+    .card h3 { margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+    .big { font-size:26px; font-weight:650; }
+    table { width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+    th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); }
+    th { background:#fafbfc; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+    tr:last-child td { border-bottom:none; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+    .healthy { background:#e8f7ee; color:var(--ok); }
+    .degraded { background:#fdf3e3; color:var(--warn); }
+    .down { background:#fdeaea; color:var(--crit); }
+    .unknown { background:#eef0f4; color:var(--muted); }
+    .muted { color:var(--muted); }
+    h2 { font-size:17px; margin:26px 0 10px; }
+  </style>
+</head>
+<body>
+<header>
+  <a href="/">SRE&nbsp;Platform</a>
+  <span class="muted">Agentic Application Reliability</span>
+</header>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>
