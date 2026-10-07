@@ -15,6 +15,7 @@ import psutil
 from .config import AgentConfig, load_config
 from .discovery import discover, hostname
 from .ingest import CoreClient
+from .logcol import file_batch, journald_batch
 from .red import collect_nginx_red
 
 log = logging.getLogger("sre-agent")
@@ -71,6 +72,7 @@ class Agent:
                     last_discovery = now
                 payload["metrics"] = {"server": collect_server_metrics()}
                 payload["red"] = collect_nginx_red(window_s=self.cfg.collect_interval_s * 10)
+                payload["logs"] = self._collect_logs()
                 payload["health_checks"] = self._probe_listening_ports()
                 self.client.ingest(payload)
             except Exception as exc:  # never die on a bad cycle
@@ -93,6 +95,31 @@ class Agent:
         self._save_state()
 
     # -------------------------------------------------- probes
+    def _collect_logs(self) -> list[dict]:
+        """Journal batches for discovered service workloads + marked log files."""
+        batches: list[dict] = []
+        seen: set[str] = set()
+        try:
+            fingerprints = discover(ignore_users=self.cfg.ignore_users)
+        except Exception:
+            fingerprints = []
+        for fp in fingerprints:
+            unit = fp.external_id or ""
+            if fp.source == "systemd" and unit and unit not in seen:
+                seen.add(unit)
+                batch = journald_batch(unit, since_minutes=5)
+                if batch:
+                    batches.append(batch)
+            if fp.cwd:
+                for marker in ("app.log", "error.log", "combined.log"):
+                    candidate = Path(fp.cwd) / marker
+                    if candidate.is_file() and str(candidate) not in seen:
+                        seen.add(str(candidate))
+                        batch = file_batch(str(candidate))
+                        if batch:
+                            batches.append(batch)
+        return batches[:8]  # bounded per cycle
+
     def _probe_listening_ports(self) -> list[dict]:
         """Probe local HTTP ports as health checks (minimal M2 scope)."""
         checks: list[dict] = []

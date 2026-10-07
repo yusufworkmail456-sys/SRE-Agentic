@@ -168,7 +168,9 @@ def create_app() -> FastAPI:
 
     @app.get("/applications/{slug}", response_class=HTMLResponse)
     def application_detail(slug: str, request: Request, db: Session = Depends(get_db)):
+        from .logstore import window_error_counts
         from .metrics import latest_points
+        from .models import LogBatch
 
         app_row = db.scalar(select(Application).where(Application.slug == slug))
         if app_row is None:
@@ -194,6 +196,13 @@ def create_app() -> FastAPI:
                 "latest": latest,
                 "server_point": server_point,
                 "points": list(reversed(points)),  # oldest -> newest for sparkline
+                "logs": db.scalars(
+                    select(LogBatch)
+                    .where(LogBatch.application_id == app_row.id)
+                    .order_by(LogBatch.ts_end.desc())
+                    .limit(12)
+                ).all(),
+                "log_counts": window_error_counts(db, app_row.id, minutes=60),
                 "findings": db.scalars(
                     select(Finding)
                     .where(Finding.application_id == app_row.id)

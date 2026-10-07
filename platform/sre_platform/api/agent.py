@@ -90,9 +90,10 @@ def ingest(
         from ..metrics import store_app_red
 
         result["red_stored"] = store_app_red(db, server, req.red)
-    # Logs are stored from M4 onward; acknowledged here so agents stay forward-compatible.
     if req.logs:
-        result["logs"] = len(req.logs)
+        from ..logstore import store_log_batches
+
+        result["logs_stored"] = store_log_batches(db, server, req.logs)
     db.commit()
     return result
 

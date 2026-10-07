@@ -125,6 +125,8 @@ def build_evidence_pack(db: Session, incident: Incident, max_chars: int = 24000)
     checks = db.scalars(
         select(HealthCheck).where(HealthCheck.application_id == app_row.id)
     ).all()
+    from .logstore import recent_error_samples
+
     pack = {
         "application": {
             "name": app_row.name, "slug": app_row.slug, "environment": app_row.environment,
@@ -150,6 +152,7 @@ def build_evidence_pack(db: Session, incident: Incident, max_chars: int = 24000)
              "p95_ms": p.p95_ms, "cpu_pct": p.cpu_pct, "mem_pct": p.mem_pct}
             for p in reversed(points)
         ],
+        "log_errors_30m": recent_error_samples(db, app_row.id, minutes=30, limit=5),
         "findings": [
             {"rule": f.rule_key, "severity": f.severity.value, "confidence": f.confidence.value,
              "title": f.title, "observation": f.observation, "evidence": f.evidence}

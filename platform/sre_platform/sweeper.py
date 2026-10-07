@@ -16,6 +16,7 @@ from . import detection, incidents, metrics
 from .config import settings
 from .db import SessionLocal
 from .models import Application
+from .rules_extra import rule_log_error_spike, rule_ssl_expiry
 
 log = logging.getLogger("sre-platform.sweeper")
 
@@ -39,6 +40,11 @@ def _run_sweep() -> None:
         for app_row in apps:
             if app_row.confirmed:
                 fired += detection.run_rules_for_app(db, app_row)
+                for extra_rule in (rule_ssl_expiry, rule_log_error_spike):
+                    try:
+                        extra_rule(db, app_row)
+                    except Exception:
+                        continue
         opened = incidents.detect_incidents(db)
         recovered = incidents.check_recovery(db)
         db.commit()

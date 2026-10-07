@@ -63,6 +63,28 @@
 </div>
 {% endif %}
 
+<h2>Logs (recent batches)</h2>
+{% if logs %}
+<table>
+  <tr><th>Window</th><th>Source</th><th>Levels</th><th>Samples</th></tr>
+  {% for b in logs %}
+  <tr>
+    <td class="muted">{{ b.ts_start.strftime("%H:%M") if b.ts_start else "—" }} → {{ b.ts_end.strftime("%H:%M") if b.ts_end else "—" }}</td>
+    <td class="muted">{{ b.source or "—" }}{% if b.workload_id %}<div>wl#{{ b.workload_id }}</div>{% endif %}</td>
+    <td>
+      {% for lvl, cnt in (b.level_counts or {}).items() %}
+        <span class="pill {{ 'down' if lvl in ('ERROR','CRITICAL') else 'unknown' }}">{{ lvl }} {{ cnt }}</span>
+      {% endfor %}
+    </td>
+    <td class="muted">
+      {% for line in (b.sample_lines or [])[:2] %}<div style="font-family:monospace;font-size:11px">{{ line[:140] }}</div>{% endfor %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="muted">Last 60 min totals: {{ log_counts.get("ERROR", 0) + log_counts.get("CRITICAL", 0) }} error lines</p>
+{% else %}<p class="muted">No log batches yet.</p>{% endif %}
+
 <h2>Findings</h2>
 {% if findings %}
 <table>
