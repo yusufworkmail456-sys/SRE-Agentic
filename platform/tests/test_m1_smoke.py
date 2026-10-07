@@ -107,7 +107,9 @@ def test_healthz(client):
 def test_overview_renders(client):
     resp = client.get("/")
     assert resp.status_code == 200
-    assert "Attention Required" in resp.text
+    assert "Fleet Overview" in resp.text
+    assert "Yang perlu kamu lakukan" in resp.text
+    assert "Applications" in resp.text
 
 
 def test_unknown_app_slug_404(client):

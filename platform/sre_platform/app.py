@@ -78,12 +78,24 @@ def create_app() -> FastAPI:
 
     @app.get("/", response_class=HTMLResponse)
     def overview(request: Request, db: Session = Depends(get_db)):
+        """Fleet overview (spec §8): status counts, next actions, per-app RED
+        table, live activity feed. Answers 'user harus apa' explicitly."""
+        from .logstore import window_error_counts
+        from .metrics import latest_points
+        from .models import LogBatch, MetricPoint, TimelineEvent
+
         apps = db.scalars(select(Application).order_by(Application.name)).all()
-        counts: dict[str, int] = {}
+        counts: dict[str, int] = {"healthy": 0, "degraded": 0, "down": 0, "unknown": 0}
         for a in apps:
             counts[a.status.value] = counts.get(a.status.value, 0) + 1
+        unconfirmed = [a for a in apps if not a.confirmed]
+
+        # Per-app row data for the table (RED + counts), and attention ranking.
+        app_rows = []
         attention = []
         for app_row in apps:
+            latest = latest_points(db, app_row.id, limit=1)
+            latest = latest[0] if latest else None
             open_findings = db.scalar(
                 select(func.count())
                 .select_from(Finding)
@@ -94,15 +106,74 @@ def create_app() -> FastAPI:
                 .select_from(Incident)
                 .where(Incident.application_id == app_row.id, Incident.status != "resolved")
             )
-            if app_row.status.value in ("down", "degraded") or open_incidents or open_findings:
-                attention.append(
-                    {
-                        "app": app_row,
-                        "findings": open_findings or 0,
-                        "incidents": open_incidents or 0,
-                    }
-                )
-        attention.sort(key=lambda r: (r["app"].status.value != "down", r["app"].status.value != "degraded"))
+            log_counts = window_error_counts(db, app_row.id, minutes=60)
+            row = {
+                "app": app_row,
+                "req_rate": latest.req_rate if latest else None,
+                "err_rate": latest.err_rate if latest else None,
+                "p95": latest.p95_ms if latest else None,
+                "findings": open_findings or 0,
+                "incidents": open_incidents or 0,
+                "log_errors_60m": log_counts.get("ERROR", 0) + log_counts.get("CRITICAL", 0),
+            }
+            app_rows.append(row)
+            if app_row.confirmed and (
+                app_row.status.value in ("down", "degraded")
+                or open_incidents
+                or (open_findings or 0) > 0
+                or row["log_errors_60m"] >= 10
+            ):
+                attention.append(row)
+        attention.sort(
+            key=lambda r: (
+                r["app"].status.value != "down",
+                r["app"].status.value != "degraded",
+                -(r["incidents"] or 0),
+                -(r["findings"] or 0),
+            )
+        )
+
+        # Next-actions checklist (what the operator should do now).
+        actions: list[dict] = []
+        for row in attention:
+            if row["app"].status.value == "down":
+                actions.append({
+                    "level": "critical",
+                    "text": f"{row['app'].name} DOWN — buka dashboard, cek incident yang sedang berjalan",
+                    "href": f"/applications/{row['app'].slug}",
+                })
+        for row in attention:
+            if row["incidents"] and row["app"].status.value != "down":
+                actions.append({
+                    "level": "warning",
+                    "text": f"{row['app'].name}: {row['incidents']} incident terbuka — review diagnosis",
+                    "href": f"/applications/{row['app'].slug}",
+                })
+        if unconfirmed:
+            names = ", ".join(a.name for a in unconfirmed[:3]) + ("…" if len(unconfirmed) > 3 else "")
+            actions.append({
+                "level": "info",
+                "text": f"{len(unconfirmed)} app hasil discovery belum dikonfirmasi ({names}) — review di halaman Discovery",
+                "href": "/discovery",
+            })
+        no_apps = len(apps) == 0
+        if no_apps:
+            actions.append({
+                "level": "info",
+                "text": "Belum ada application — install sre-agent di VM target (docs/runbook-agent-install.md) atau register manual via API",
+                "href": "/discovery",
+            })
+        if not actions:
+            actions.append({
+                "level": "ok",
+                "text": "Semua sehat. Tidak ada yang perlu ditindak.",
+                "href": "",
+            })
+
+        servers = db.scalars(select(Server)).all()
+        recent_events = db.scalars(
+            select(TimelineEvent).order_by(TimelineEvent.ts.desc()).limit(12)
+        ).all()
         return templates.TemplateResponse(
             request,
             "overview.html",
@@ -111,7 +182,12 @@ def create_app() -> FastAPI:
                 "counts": counts,
                 "total": len(apps),
                 "attention": attention,
-                "servers": db.scalars(select(Server)).all(),
+                "app_rows": app_rows,
+                "actions": actions,
+                "no_apps": no_apps,
+                "unconfirmed_count": len(unconfirmed),
+                "servers": servers,
+                "recent_events": recent_events,
             },
         )
 
