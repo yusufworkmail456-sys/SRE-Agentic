@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Discovery — SRE Platform{% endblock %}
+{% block content %}
+<h2>Discovery</h2>
+<p class="muted">Auto-discovered candidates are unconfirmed and never alert until an operator reviews them.</p>
+
+<h3 style="font-size:14px">Unconfirmed candidates ({{ candidates|length }})</h3>
+{% if candidates %}
+<table>
+  <tr><th>Name</th><th>Server</th><th>Model</th><th>Workloads</th><th>Ports</th><th>Confirm</th></tr>
+  {% for a in candidates %}
+  <tr>
+    <td>{{ a.name }}<div class="muted">{{ a.slug }}</div></td>
+    <td class="muted">{{ a.server.hostname if a.server else "—" }}</td>
+    <td class="muted">{{ a.deployment_model.value }} / {{ (a.auto_discovery_fingerprint or {}).get('source','—') }}</td>
+    <td class="muted">
+      {% for w in a.workloads %}{{ w.name }}{{ ", " if not loop.last }}{% endfor %}
+    </td>
+    <td class="muted">
+      {% for w in a.workloads %}{% for i in w.instances %}{{ i.listen_port or "" }}{% endfor %}{% endfor %}
+    </td>
+    <td>
+      <form method="post" action="/discovery/{{ a.slug }}/confirm" style="display:flex;gap:6px">
+        <input name="name" value="{{ a.name }}" style="width:150px">
+        <input name="environment" value="{{ a.environment }}" style="width:70px">
+        <input name="owner" placeholder="owner" style="width:90px">
+        <input name="health_check_url" placeholder="health url (opt)" style="width:180px">
+        <button type="submit">Confirm</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">No unconfirmed candidates.</p>{% endif %}
+
+<h3 style="font-size:14px">Registered applications ({{ apps|length }})</h3>
+<table>
+  <tr><th>Status</th><th>Name</th><th>Env</th><th>Model</th><th>Discovery</th></tr>
+  {% for a in apps %}
+  <tr>
+    <td><span class="pill {{ a.status.value }}">{{ a.status.value }}</span></td>
+    <td><a href="/applications/{{ a.slug }}">{{ a.name }}</a></td>
+    <td class="muted">{{ a.environment }}</td>
+    <td class="muted">{{ a.deployment_model.value }}</td>
+    <td class="muted">{{ a.discovery.value }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

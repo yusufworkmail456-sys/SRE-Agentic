@@ -1,0 +1,14 @@
+[Unit]
+Description=SRE Agent (discovery + collection)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/sre-agent --config /etc/sre-agent/config.toml run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -22,7 +22,7 @@ from sre_platform.models import (
 )
 
 
-@pytest.fixture()
+@pytest.fixture(autouse=True)
 def db():
     Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
@@ -35,7 +35,8 @@ def db():
 
 @pytest.fixture()
 def client():
-    return TestClient(create_app())
+    with TestClient(create_app()) as c:
+        yield c
 
 
 def test_model_graph_roundtrip(db):

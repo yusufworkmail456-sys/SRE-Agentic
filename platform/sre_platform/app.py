@@ -4,27 +4,55 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .api import agent as agent_api
+from .api import apps as apps_api
 from .config import settings
 from .db import engine, get_db
 from .models import Application, Base, Finding, Incident, Server, TimelineEvent
+from .services import confirm_application, slugify, unique_slug
 
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def _ensure_bootstrap_admin() -> None:
+    """First-run: create the admin user, one-time password written 0600 (Trazezzo pattern)."""
+    import secrets
+
+    from .models import User
+    from .security import hash_password
+
+    db = next(get_db())
+    try:
+        if db.scalar(select(User).limit(1)) is not None:
+            return
+        password = secrets.token_urlsafe(14)
+        db.add(User(username="admin", password_hash=hash_password(password), role="admin"))
+        db.commit()
+        secret_file = Path(settings.data_dir) / "initial_admin_password.txt"
+        secret_file.parent.mkdir(parents=True, exist_ok=True)
+        secret_file.write_text(f"admin: {password}\n")
+        secret_file.chmod(0o600)
+    finally:
+        db.close()
 
 
 def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         Base.metadata.create_all(engine)
+        _ensure_bootstrap_admin()
         yield
 
     app = FastAPI(title=settings.app_name, version=settings.version, lifespan=lifespan)
     templates = Jinja2Templates(directory=str(BASE_DIR / "ui" / "templates"))
+    app.include_router(apps_api.router)
+    app.include_router(agent_api.router)
 
     @app.get("/healthz")
     def healthz(db: Session = Depends(get_db)) -> dict:
@@ -69,6 +97,61 @@ def create_app() -> FastAPI:
                 "servers": db.scalars(select(Server)).all(),
             },
         )
+
+    @app.get("/discovery", response_class=HTMLResponse)
+    def discovery(request: Request, db: Session = Depends(get_db)):
+        candidates = db.scalars(
+            select(Application).where(Application.confirmed == False)  # noqa: E712
+            .order_by(Application.name)
+        ).all()
+        return templates.TemplateResponse(
+            request,
+            "discovery.html",
+            {
+                "settings": settings,
+                "candidates": candidates,
+                "servers": db.scalars(select(Server)).all(),
+                "apps": db.scalars(
+                    select(Application).where(Application.confirmed == True)  # noqa: E712
+                    .order_by(Application.name)
+                ).all(),
+            },
+        )
+
+    @app.post("/discovery/{slug}/confirm", response_class=HTMLResponse)
+    def confirm_form(
+        slug: str,
+        request: Request,
+        db: Session = Depends(get_db),
+        name: str = Form(""),
+        environment: str = Form("prod"),
+        owner: str = Form(""),
+        health_check_url: str = Form(""),
+    ):
+        app_row = db.scalar(select(Application).where(Application.slug == slug))
+        if app_row is None:
+            return HTMLResponse("<h1>404</h1>", status_code=404)
+        if health_check_url:
+            from .models import HealthCheck
+
+            db.add(
+                HealthCheck(
+                    application_id=app_row.id,
+                    kind="http" if health_check_url.startswith("http") else "tcp",
+                    target=health_check_url,
+                    interval_s=30,
+                )
+            )
+        if name and name != app_row.name:
+            new_base = slugify(name)
+            if new_base != app_row.slug:  # keep slug when unchanged, avoid -2 suffix
+                app_row.slug = unique_slug(db, new_base)
+            app_row.name = name
+        confirm_application(
+            db, app_row, environment=environment or None, owner=owner or None
+        )
+        db.commit()
+        return RedirectResponse("/discovery", status_code=303)
 
     @app.get("/applications/{slug}", response_class=HTMLResponse)
     def application_detail(slug: str, request: Request, db: Session = Depends(get_db)):

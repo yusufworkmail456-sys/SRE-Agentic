@@ -1,0 +1,16 @@
+# sre-agent configuration
+# /etc/sre-agent/config.toml  (chmod 600 — holds the agent's core token)
+
+core_url = "http://127.0.0.1:9141"        # or https://host/sre behind nginx
+token = ""                                 # empty = bootstrap: core issues one on first register
+hostname = ""                              # optional override; defaults to system hostname
+collect_interval_s = 30
+discovery_interval_s = 300
+timeout_s = 10
+verify_tls = true
+state_path = "/var/lib/sre-agent/state.json"
+log_path = "/var/log/sre-agent.log"
+
+# Execution gate — defense in depth (core enforces its own copy).
+allow_exec = false
+exec_allowlist = []                        # e.g. ["restart_service", "retry_health_check"]
