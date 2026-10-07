@@ -106,6 +106,34 @@ def test_sse_parser_strips_done_sentinel(monkeypatch):
     assert client.chat("s", "u") == "helpful"
 
 
+def test_json_body_with_trailing_done_sentinel(monkeypatch):
+    """Live router quirk: content-type says SSE, body is one JSON object then 'data: [DONE]'."""
+    body = (
+        '{"choices":[{"message":{"content":"OK"},"finish_reason":"stop"}],'
+        '"model":"glm-5-3-flash"}\ndata: [DONE]\n'
+    )
+    client = LLMClient("http://fake", "k", "m")
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return httpx.Response(200, text=body, headers={"content-type": "text/event-stream"},
+                              request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert client.chat("s", "u") == "OK"
+
+
+def test_plain_json_without_sse_headers(monkeypatch):
+    body = '{"choices":[{"message":{"content":"plain"}}]}'
+    client = LLMClient("http://fake", "k", "m")
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        return httpx.Response(200, text=body, headers={"content-type": "application/json"},
+                              request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert client.chat("s", "u") == "plain"
+
+
 def test_client_disabled_without_config():
     client = LLMClient("", "", "")
     assert client.enabled is False

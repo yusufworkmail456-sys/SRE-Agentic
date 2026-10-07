@@ -59,13 +59,26 @@ class LLMClient:
     def _extract_text(self, resp: httpx.Response) -> str:
         content_type = resp.headers.get("content-type", "")
         raw = resp.text
-        if "text/event-stream" in content_type or raw.lstrip().startswith("data:"):
+        stripped = raw.lstrip()
+        # The router sometimes labels responses SSE while sending plain JSON
+        # (single complete object, no data: frames).
+        if stripped.startswith("{") and '"choices"' in stripped:
+            try:
+                return self._from_json_body(stripped)
+            except LLMUnavailable:
+                pass
+        if "text/event-stream" in content_type or stripped.startswith("data:"):
             return self._from_sse(raw)
-        data = resp.json()
+        return self._from_json_body(stripped)
+
+    @staticmethod
+    def _from_json_body(raw: str) -> str:
+        """Parse the first JSON object; router appends 'data: [DONE]' after it."""
         try:
+            data, _ = json.JSONDecoder().raw_decode(raw.lstrip())
             return data["choices"][0]["message"]["content"] or ""
-        except (KeyError, IndexError, TypeError) as exc:
-            raise LLMUnavailable(f"unexpected LLM response shape: {list(data)}") from exc
+        except (ValueError, KeyError, IndexError, TypeError) as exc:
+            raise LLMUnavailable(f"unexpected LLM response shape: {exc}") from exc
 
     def _from_sse(self, raw: str) -> str:
         parts: list[str] = []
