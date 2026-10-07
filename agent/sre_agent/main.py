@@ -77,7 +77,7 @@ class Agent:
                 payload["metrics"] = {"server": collect_server_metrics()}
                 payload["red"] = collect_nginx_red(window_s=self.cfg.collect_interval_s * 10)
                 payload["logs"] = self._collect_logs()
-                payload["health_checks"] = self._probe_listening_ports()
+                payload["health_checks"] = self._probe_listening_ports() + self._probe_http_targets()
                 containers = dockercol.list_containers()
                 if containers:
                     payload["containers"] = {
@@ -89,6 +89,7 @@ class Agent:
                     }
                 self.client.ingest(payload)
                 self._poll_and_execute()
+                self._refresh_http_targets()
             except Exception as exc:  # never die on a bad cycle
                 log.warning("cycle failed: %s", exc)
                 # 401 = our token/server row is gone (fresh core DB). Re-bootstrap.
@@ -101,6 +102,18 @@ class Agent:
                     except Exception:
                         pass
             time.sleep(self.cfg.collect_interval_s)
+
+    def _refresh_http_targets(self) -> None:
+        """Pull the current http health-check URL list from core config."""
+        try:
+            cfg = self.client.get_config()
+        except Exception:
+            return
+        targets = cfg.get("http_health_targets") or []
+        if targets != self.state.get("http_targets"):
+            self.state["http_targets"] = targets
+            self._save_state()
+            log.info("http health targets updated: %s", targets)
 
     def _poll_and_execute(self) -> None:
         """Poll approved actions; run ONLY what the local allowlist permits (§18)."""
@@ -140,6 +153,30 @@ class Agent:
         self._save_state()
 
     # -------------------------------------------------- probes
+    def _probe_http_targets(self) -> list[dict]:
+        """HTTP health checks (§7): URLs from core config, 2xx/3xx = ok."""
+        checks: list[dict] = []
+        for url in (self.state.get("http_targets") or [])[:10]:
+            ok, status_code, latency_ms = False, None, None
+            try:
+                started = time.monotonic()
+                resp = self.client.http_get(url)
+                latency_ms = round((time.monotonic() - started) * 1000, 1)
+                status_code = resp.status_code
+                ok = resp.status_code < 400
+            except Exception as exc:
+                log.debug("http probe %s failed: %s", url, exc)
+            checks.append(
+                {
+                    "kind": "http",
+                    "target": url,
+                    "result": "ok" if ok else "fail",
+                    "status_code": status_code,
+                    "latency_ms": latency_ms,
+                }
+            )
+        return checks
+
     def _collect_logs(self) -> list[dict]:
         """Journal batches for discovered service workloads + marked log files + docker logs."""
         batches: list[dict] = []

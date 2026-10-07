@@ -79,17 +79,10 @@
 {% endif %}
 
 <h2>Aktivitas terbaru</h2>
-{% if recent_events %}
-<table>
-  <tr><th>Waktu</th><th>App</th><th>Jenis</th><th>Kejadian</th></tr>
-  {% for e in recent_events %}
-  <tr>
-    <td class="muted">{{ e.ts.strftime("%m-%d %H:%M:%S") }}</td>
-    <td class="muted">{{ e.app.name if e.app else "—" }}</td>
-    <td class="muted">{{ e.kind }}</td>
-    <td>{{ e.summary[:120] }}</td>
-  </tr>
-  {% endfor %}
-</table>
-{% else %}<p class="muted">Belum ada aktivitas tercatat.</p>{% endif %}
+<div id="live-activity"
+     hx-get="{{ u('/activity') }}"
+     hx-trigger="every {{ settings.ui_refresh_s }}s"
+     hx-swap="innerHTML">
+  {% include "_activity_live.html" %}
+</div>
 {% endblock %}

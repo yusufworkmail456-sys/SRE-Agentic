@@ -36,3 +36,12 @@ class CoreClient:
     def report_action(self, action_id: int, result: dict) -> None:
         resp = self.client.post(f"/api/agent/v1/actions/{action_id}/result", json=result)
         resp.raise_for_status()
+
+    def http_get(self, url: str) -> "httpx.Response":
+        """Plain GET for HTTP health probes (follows redirects, short timeout)."""
+        return self.client.get(url, follow_redirects=True)
+
+    def get_config(self) -> dict:
+        resp = self.client.get("/api/agent/v1/config")
+        resp.raise_for_status()
+        return resp.json()

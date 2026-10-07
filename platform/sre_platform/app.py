@@ -297,6 +297,18 @@ def create_app() -> FastAPI:
         db.commit()
         return RedirectResponse(_u("/discovery"), status_code=303)
 
+    @app.get("/activity", response_class=HTMLResponse)
+    def activity_fragment(request: Request, db: Session = Depends(get_db)):
+        """Polled fragment: live activity feed (near-realtime UI, §12)."""
+        recent_events = db.scalars(
+            select(TimelineEvent).order_by(TimelineEvent.ts.desc()).limit(12)
+        ).all()
+        return templates.TemplateResponse(
+            request,
+            "_activity_live.html",
+            {"settings": settings, "recent_events": recent_events},
+        )
+
     @app.get("/topology", response_class=HTMLResponse)
     def topology_page(request: Request, db: Session = Depends(get_db)):
         """Service/dependency topology (spec §10)."""
@@ -311,6 +323,37 @@ def create_app() -> FastAPI:
                 "nodes": topo["nodes"],
                 "edges": topo["edges"],
                 "app_names": topo["app_names"],
+            },
+        )
+
+    @app.get("/applications/{slug}/metrics", response_class=HTMLResponse)
+    def metrics_fragment(slug: str, request: Request, db: Session = Depends(get_db)):
+        """Polled fragment: RED cards + sparkline (near-realtime, §7/§9)."""
+        from .metrics import latest_points
+
+        app_row = db.scalar(select(Application).where(Application.slug == slug))
+        if app_row is None:
+            return HTMLResponse('<p class="muted">application not found</p>', status_code=404)
+        points = latest_points(db, app_row.id, limit=48)
+        server_point = (
+            db.scalars(
+                select(MetricPoint)
+                .where(MetricPoint.server_id == app_row.server_id)
+                .order_by(MetricPoint.ts.desc())
+                .limit(1)
+            ).first()
+            if app_row.server_id
+            else None
+        )
+        return templates.TemplateResponse(
+            request,
+            "_metrics_live.html",
+            {
+                "settings": settings,
+                "app": app_row,
+                "latest": points[0] if points else None,
+                "server_point": server_point,
+                "points": list(reversed(points)),
             },
         )
 

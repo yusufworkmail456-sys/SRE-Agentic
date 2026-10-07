@@ -1,0 +1,48 @@
+{# Live-refresh fragment: metrics cards + sparkline (polled by HTMX every cycle). #}
+<div class="grid">
+  <div class="card">
+    <h3>Request rate</h3>
+    <div class="big">{{ "%.2f"|format(latest.req_rate) if latest and latest.req_rate is not none else "—" }}</div>
+    <div class="muted">req/s (nginx log window)</div>
+  </div>
+  <div class="card">
+    <h3>Error rate</h3>
+    <div class="big {% if latest and latest.err_rate and latest.err_rate > 0.05 %}err{% endif %}">
+      {{ "%.1f%%"|format(latest.err_rate * 100) if latest and latest.err_rate is not none else "—" }}</div>
+    <div class="muted">4xx + 5xx</div>
+  </div>
+  <div class="card">
+    <h3>P95 latency</h3>
+    <div class="big">{{ "%.0fms"|format(latest.p95_ms) if latest and latest.p95_ms is not none else "—" }}</div>
+    <div class="muted">P50 {{ "%.0fms"|format(latest.p50_ms) if latest and latest.p50_ms is not none else "—" }} · P99 {{ "%.0fms"|format(latest.p99_ms) if latest and latest.p99_ms is not none else "—" }}</div>
+  </div>
+  <div class="card">
+    <h3>Host CPU / Mem</h3>
+    <div class="big">{{ "%.0f%%"|format(server_point.cpu_pct) if server_point and server_point.cpu_pct is not none else "—" }} / {{ "%.0f%%"|format(server_point.mem_pct) if server_point and server_point.mem_pct is not none else "—" }}</div>
+    <div class="muted">disk {{ "%.0f%%"|format(server_point.disk_pct) if server_point and server_point.disk_pct is not none else "—" }} · updated {{ server_point.ts.strftime("%H:%M:%S") if server_point and server_point.ts else "—" }}</div>
+  </div>
+</div>
+
+{% if points %}
+<div class="card" style="margin-top:14px">
+  <h3>P95 latency — last {{ points|length }} samples</h3>
+  <svg viewBox="0 0 600 90" preserveAspectRatio="none" style="width:100%;height:90px">
+    {%- set ns = namespace(min_v=None, max_v=None) -%}
+    {%- for p in points %}{% if p.p95_ms is not none %}
+      {%- if ns.min_v is none or p.p95_ms < ns.min_v %}{% set ns.min_v = p.p95_ms %}{% endif %}
+      {%- if ns.max_v is none or p.p95_ms > ns.max_v %}{% set ns.max_v = p.p95_ms %}{% endif %}
+    {% endif %}{% endfor -%}
+    {%- if ns.min_v is not none and ns.max_v is not none and ns.max_v > ns.min_v %}
+      {%- set span = ns.max_v - ns.min_v -%}
+      {%- set pts = [] -%}
+      {%- for p in points %}{% if p.p95_ms is not none %}
+        {%- set x = loop.index0 * 600 / (points|length - 1) -%}
+        {%- set y = 85 - (p.p95_ms - ns.min_v) * 80 / span -%}
+        {%- if pts.append([x, y]) %}{% endif -%}
+      {% endif %}{% endfor -%}
+      <polyline points="{{ pts | map('join', ',') | join(' ') }}" fill="none" stroke="#2563eb" stroke-width="2"/>
+    {%- endif -%}
+  </svg>
+  <div class="muted">auto-refresh {{ settings.ui_refresh_s }}s</div>
+</div>
+{% endif %}

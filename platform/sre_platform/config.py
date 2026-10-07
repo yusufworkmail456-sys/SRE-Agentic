@@ -45,5 +45,8 @@ class Settings(BaseSettings):
     retention_rollup_days: int = 30
     retention_logs_days: int = 7
 
+    # UI live-refresh cadence (HTMX polling, seconds)
+    ui_refresh_s: int = 30
+
 
 settings = Settings()

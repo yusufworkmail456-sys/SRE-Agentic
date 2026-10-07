@@ -161,10 +161,21 @@ def action_result(
 
 
 @router.get("/config")
-def agent_config(server: Server = Depends(agent_server)):
+def agent_config(server: Server = Depends(agent_server), db: Session = Depends(get_db)):
+    """Effective agent config + the HTTP health-check URLs registered for this
+    server's apps (agent probes them every cycle — §7 HTTP probe)."""
+    from ..models import Application, HealthCheck
+
+    urls: list[str] = []
+    apps = db.scalars(select(Application).where(Application.server_id == server.id)).all()
+    for app_row in apps:
+        for check in app_row.health_checks:
+            if check.kind == "http" and check.enabled and check.target not in urls:
+                urls.append(check.target)
     return {
         "collect_interval_s": 30,
         "discovery_interval_s": 300,
         "allow_exec": bool((server.capabilities or {}).get("exec")),
         "min_interval_s": 30,
+        "http_health_targets": urls,
     }

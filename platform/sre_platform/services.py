@@ -21,6 +21,7 @@ from .models import (
     DiscoverySource,
     Endpoint,
     HealthCheck,
+    MetricPoint,
     RuntimeInstance,
     Server,
     TimelineEvent,
@@ -203,7 +204,10 @@ def apply_discovery(db: Session, server: Server, fingerprints: list[dict]) -> di
     return {"created": created, "matched": matched}
 
 
-def _flip_status(db: Session, app_row: Application, ok: bool, target: str) -> None:
+def _flip_status(
+    db: Session, app_row: Application, ok: bool, target: str,
+    latency_ms: float | None = None, status_code: int | None = None,
+) -> None:
     """Hysteresis (spec §11 health): 3 consecutive fails -> down, 2 oks -> healthy."""
     check = db.scalar(
         select(HealthCheck).where(
@@ -218,10 +222,11 @@ def _flip_status(db: Session, app_row: Application, ok: bool, target: str) -> No
     if ok:
         check.consecutive_oks += 1
         check.consecutive_failures = 0
-        check.last_latency_ms = None
     else:
         check.consecutive_failures += 1
         check.consecutive_oks = 0
+    if latency_ms is not None:
+        check.last_latency_ms = latency_ms
     if not app_row.confirmed:
         return
     previous = app_row.status
@@ -249,8 +254,24 @@ def apply_health_checks(db: Session, server: Server, checks: list[dict]) -> int:
             app_row = db.get(Application, existing.application_id)
         if app_row is None or app_row.server_id != server.id:
             continue
-        _flip_status(db, app_row, check.get("result") == "ok", target)
+        _flip_status(
+            db, app_row, check.get("result") == "ok", target,
+            latency_ms=check.get("latency_ms"),
+        )
         applied += 1
+        # HTTP probe latency is a first-class health signal -> feed it into the
+        # app-level metric stream so the dashboard shows real latency (§9).
+        if check.get("kind") == "http" and check.get("latency_ms") is not None:
+            db.add(
+                MetricPoint(
+                    application_id=app_row.id,
+                    server_id=server.id,
+                    ts=datetime.now(UTC),
+                    p50_ms=check.get("latency_ms"),
+                    p95_ms=check.get("latency_ms"),
+                    raw={"source": "http_health", "status_code": check.get("status_code")},
+                )
+            )
     db.flush()
     return applied
 

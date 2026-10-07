@@ -1,0 +1,12 @@
+{# Live activity fragment for the overview (polled). #}
+<table>
+  <tr><th>Waktu</th><th>App</th><th>Jenis</th><th>Kejadian</th></tr>
+  {% for e in recent_events %}
+  <tr>
+    <td class="muted">{{ e.ts.strftime("%m-%d %H:%M:%S") }}</td>
+    <td class="muted">{{ e.app.name if e.app else "—" }}</td>
+    <td class="muted">{{ e.kind }}</td>
+    <td>{{ e.summary[:120] }}</td>
+  </tr>
+  {% endfor %}
+</table>
