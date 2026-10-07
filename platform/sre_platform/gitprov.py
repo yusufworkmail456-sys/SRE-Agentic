@@ -72,7 +72,10 @@ def clone_or_fetch(db: Session, repo: Repository) -> Path | None:
         url = url.replace("https://", f"https://x-access-token:{token}@", 1)
     path = repos_dir() / f"{repo.application_id}.git"
     if not (path / "HEAD").exists():
-        rc, out = _run_git(["clone", "--bare", "--filter=blob:none", url, str(path)], timeout=120)
+        # No --filter=blob:none: a partial mirror breaks local worktree clones in
+        # gitwrite (blobs are missing and lazily fetched from origin). Repos here
+        # are small; correctness beats clone size.
+        rc, out = _run_git(["clone", "--bare", url, str(path)], timeout=180)
         if rc != 0:
             log.warning("clone failed for app %s: %s", repo.application_id, out[:200])
             return None

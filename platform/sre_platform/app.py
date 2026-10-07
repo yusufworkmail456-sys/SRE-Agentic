@@ -18,6 +18,7 @@ from .api import ask as ask_api
 from .api import postmortem as pm_api
 from .api import repo as repo_api
 from .api import repo_ui as repo_ui_api
+from .api import remediation as remediation_api
 from .config import settings
 from .db import engine, get_db
 from .models import (
@@ -100,6 +101,7 @@ def create_app() -> FastAPI:
     app.include_router(pm_api.router)
     app.include_router(repo_api.router)
     app.include_router(repo_ui_api.router)
+    app.include_router(remediation_api.router)
 
     @app.get("/healthz")
     def healthz(db: Session = Depends(get_db)) -> dict:

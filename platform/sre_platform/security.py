@@ -75,16 +75,32 @@ def agent_server(
     return server
 
 
-def require_role(minimum: str = "viewer"):
-    """RBAC gate for UI/API routes (spec §27). Session auth wired in M5."""
+ROLE_BOOTSTRAP: dict[str, str] = {"admin": "admin"}
 
-    def _dep(db: Session = Depends(get_db), user: str | None = Header(default=None, alias="X-User")):
-        if user is None:
+
+def require_role(minimum: str = "viewer"):
+    """RBAC gate. Identity comes from nginx basic-auth via X-Remote-User, which
+    nginx SETS with `proxy_set_header` (overwriting anything the client sent) —
+    so it cannot be spoofed when the app is only reachable through nginx.
+    X-User is accepted as a fallback for direct/loopback dev use only.
+    """
+
+    def _dep(
+        db: Session = Depends(get_db),
+        remote_user: str | None = Header(default=None, alias="X-Remote-User"),
+        user: str | None = Header(default=None, alias="X-User"),
+    ):
+        name = remote_user or user
+        if name is None:
             if minimum == "viewer":
-                return None  # read-only access allowed pre-auth in MVP
+                return None  # read-only access pre-auth (loopback dev)
             raise HTTPException(401, "authentication required")
-        row = db.scalar(select(User).where(User.username == user, User.active == True))  # noqa: E712
-        if row is None or ROLE_ORDER.get(row.role, -1) < ROLE_ORDER[minimum]:
+        row = db.scalar(select(User).where(User.username == name, User.active == True))  # noqa: E712
+        if row is None:
+            if ROLE_BOOTSTRAP.get(name) and minimum == "viewer":
+                return None
+            raise HTTPException(403, f"unknown user {name!r}")
+        if ROLE_ORDER.get(row.role, -1) < ROLE_ORDER[minimum]:
             raise HTTPException(403, f"requires role {minimum}")
         return row
 
