@@ -36,6 +36,7 @@ from .services import confirm_application, slugify, unique_slug
 from . import sweeper
 
 BASE_DIR = Path(__file__).resolve().parent
+PAGE_SIZE = 10  # table pagination (user request: max 10 rows per page)
 
 
 def _now_utc():
@@ -259,7 +260,20 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/discovery", response_class=HTMLResponse)
-    def discovery(request: Request, db: Session = Depends(get_db)):
+    def discovery(request: Request, db: Session = Depends(get_db), page: int = 1):
+        page = max(1, page)
+        all_apps = db.scalars(
+            select(Application).where(Application.confirmed == True)  # noqa: E712
+            .order_by(Application.name)
+        ).all()
+        total = len(all_apps)
+        pages = max(1, -(-total // PAGE_SIZE))
+        page = min(page, pages)
+        start = (page - 1) * PAGE_SIZE
+
+        def _page_url(p: int) -> str:
+            return f"{_u('/discovery')}?page={p}"
+
         candidates = db.scalars(
             select(Application).where(Application.confirmed == False)  # noqa: E712
             .order_by(Application.name)
@@ -272,10 +286,11 @@ def create_app() -> FastAPI:
                 "nav": "discovery",
                 "candidates": candidates,
                 "servers": db.scalars(select(Server)).all(),
-                "apps": db.scalars(
-                    select(Application).where(Application.confirmed == True)  # noqa: E712
-                    .order_by(Application.name)
-                ).all(),
+                "apps": all_apps[start : start + PAGE_SIZE],
+                "apps_total": total,
+                "nav_pages": {"page": page, "pages": pages,
+                              "prev_url": _page_url(page - 1) if page > 1 else None,
+                              "next_url": _page_url(page + 1) if page < pages else None},
             },
         )
 
@@ -407,29 +422,45 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/applications/{slug}/logs", response_class=HTMLResponse)
-    def logs_fragment(slug: str, request: Request, db: Session = Depends(get_db)):
-        """Polled fragment: realtime log batches (M11)."""
+    def logs_fragment(
+        slug: str, request: Request, db: Session = Depends(get_db), page: int = 1
+    ):
+        """Polled fragment: realtime log batches (M11) + pagination."""
         from .logstore import window_error_counts
         from .models import LogBatch
 
         app_row = db.scalar(select(Application).where(Application.slug == slug))
         if app_row is None:
             return HTMLResponse('<p class="muted">application not found</p>', status_code=404)
-        logs = db.scalars(
+        all_logs = db.scalars(
             select(LogBatch)
             .where(LogBatch.application_id == app_row.id)
             .order_by(LogBatch.ts_end.desc())
-            .limit(8)
         ).all()
+        page = max(1, page)
+        pages = max(1, -(-len(all_logs) // PAGE_SIZE))
+        page = min(page, pages)
+        start = (page - 1) * PAGE_SIZE
+        logs = all_logs[start : start + PAGE_SIZE]
+
+        def _url(p: int) -> str:
+            return f"{_u('/applications')}/{slug}/logs?page={p}"
+
         return templates.TemplateResponse(
             request,
             "_logs_live.html",
             {"settings": settings, "app": app_row, "logs": logs,
-             "log_counts": window_error_counts(db, app_row.id, minutes=60)},
+             "log_counts": window_error_counts(db, app_row.id, minutes=60),
+             "nav_pages": {"page": page, "pages": pages,
+                           "prev_url": _url(page - 1) if page > 1 else None,
+                           "next_url": _url(page + 1) if page < pages else None}},
         )
 
     @app.get("/applications/{slug}", response_class=HTMLResponse)
-    def application_detail(slug: str, request: Request, db: Session = Depends(get_db)):
+    def application_detail(
+        slug: str, request: Request, db: Session = Depends(get_db),
+        fpage: int = 1, tpage: int = 1,
+    ):
         from .logstore import window_error_counts
         from .metrics import latest_points
         from .models import LogBatch, Postmortem, Repository, SLO
@@ -438,6 +469,22 @@ def create_app() -> FastAPI:
         from .postmortem import budget_context_for_recommendations, slo_summary_for_app
         from .quickreminders import active_quick_findings
         from .quickreport import latest_report, perf_test_state
+
+        def _paged(query_rows, page: int):
+            page = max(1, page)
+            pages = max(1, -(-len(query_rows) // PAGE_SIZE))
+            page = min(page, pages)
+            start = (page - 1) * PAGE_SIZE
+
+            def _url(p: int) -> str:
+                return f"{_u('/applications')}/{slug}?fpage={fpage}&tpage={tpage}".split("?")[0] + \
+                    f"?fpage={fpage if p is None else p}&tpage={tpage}"
+
+            return query_rows[start : start + PAGE_SIZE], {
+                "page": page, "pages": pages,
+                "prev_url": _url(page - 1) if page > 1 else None,
+                "next_url": _url(page + 1) if page < pages else None,
+            }
 
         app_row = db.scalar(select(Application).where(Application.slug == slug))
         if app_row is None:
@@ -456,6 +503,29 @@ def create_app() -> FastAPI:
         )
         running_test, latest_test = perf_test_state(db, app_row.id)
         report = latest_report(db, app_row.id)
+        all_findings = db.scalars(
+            select(Finding)
+            .where(Finding.application_id == app_row.id)
+            .order_by(Finding.last_seen.desc())
+        ).all()
+        findings, findings_pages = _paged(all_findings, fpage)
+        all_timeline = db.scalars(
+            select(TimelineEvent)
+            .where(TimelineEvent.application_id == app_row.id)
+            .order_by(TimelineEvent.ts.desc())
+        ).all()
+        timeline, timeline_pages = _paged(all_timeline, tpage)
+
+        def _fp_url(p: int) -> str:
+            return f"{_u('/applications')}/{slug}?fpage={p}&tpage={timeline_pages['page']}"
+
+        def _tp_url(p: int) -> str:
+            return f"{_u('/applications')}/{slug}?fpage={findings_pages['page']}&tpage={p}"
+
+        findings_pages.update(prev_url=_fp_url(findings_pages["page"] - 1) if findings_pages["page"] > 1 else None,
+                              next_url=_fp_url(findings_pages["page"] + 1) if findings_pages["page"] < findings_pages["pages"] else None)
+        timeline_pages.update(prev_url=_tp_url(timeline_pages["page"] - 1) if timeline_pages["page"] > 1 else None,
+                              next_url=_tp_url(timeline_pages["page"] + 1) if timeline_pages["page"] < timeline_pages["pages"] else None)
         return templates.TemplateResponse(
             request,
             "application.html",
@@ -479,6 +549,8 @@ def create_app() -> FastAPI:
                 "running_test": running_test,
                 "latest_test": latest_test,
                 "report": report,
+                "findings_pages": findings_pages,
+                "timeline_pages": timeline_pages,
                 "postmortems": db.scalars(
                     select(Postmortem)
                     .where(Postmortem.incident_id.in_(
@@ -487,12 +559,7 @@ def create_app() -> FastAPI:
                     .order_by(Postmortem.created_at.desc())
                     .limit(10)
                 ).all(),
-                "findings": db.scalars(
-                    select(Finding)
-                    .where(Finding.application_id == app_row.id)
-                    .order_by(Finding.last_seen.desc())
-                    .limit(20)
-                ).all(),
+                "findings": findings,
                 "deployments": db.scalars(
                     select(Deployment)
                     .where(Deployment.application_id == app_row.id)
@@ -506,12 +573,7 @@ def create_app() -> FastAPI:
                     .order_by(Incident.detected_at.desc())
                     .limit(10)
                 ).all(),
-                "timeline": db.scalars(
-                    select(TimelineEvent)
-                    .where(TimelineEvent.application_id == app_row.id)
-                    .order_by(TimelineEvent.ts.desc())
-                    .limit(50)
-                ).all(),
+                "timeline": timeline,
             },
         )
 

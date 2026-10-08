@@ -1,4 +1,9 @@
-{# Polled fragment: recent log batches (realtime via agent). #}
+{# Polled fragment: recent log batches (realtime via agent) + pagination. #}
+{% from "_pager.html" import pager %}
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+  <span class="live-badge">LIVE</span>
+  <span class="muted">streaming dari agent tiap siklus ({{ settings.ui_refresh_s }}s refresh)</span>
+</div>
 {% if logs %}
 <table>
   <tr><th>Window</th><th>Source</th><th>Levels</th><th>Sample</th></tr>
@@ -17,5 +22,6 @@
   </tr>
   {% endfor %}
 </table>
+{{ pager(nav_pages) }}
 <p class="muted">Total 60 menit terakhir: {{ log_counts.get("ERROR", 0) + log_counts.get("CRITICAL", 0) }} baris error</p>
 {% else %}<p class="muted">Belum ada log batch.</p>{% endif %}

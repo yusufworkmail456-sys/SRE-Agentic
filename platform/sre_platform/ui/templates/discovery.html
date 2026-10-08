@@ -58,7 +58,7 @@
 </table>
 {% else %}<p class="muted">Tidak ada kandidat baru.</p>{% endif %}
 
-<h2>Terdaftar ({{ apps|length }})</h2>
+<h2>Terdaftar ({{ apps_total }}) <span class="cap">10 per halaman</span></h2>
 <table>
   <tr><th>Status</th><th>Nama</th><th>Label</th><th>Env</th><th>Model</th><th>Asal</th></tr>
   {% for a in apps %}
@@ -72,4 +72,5 @@
   </tr>
   {% endfor %}
 </table>
+{% from "_pager.html" import pager %}{{ pager(nav_pages) }}
 {% endblock %}

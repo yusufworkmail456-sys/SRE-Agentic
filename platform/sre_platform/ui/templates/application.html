@@ -139,6 +139,7 @@
       </tr>
       {% endfor %}
     </table>
+    {% from "_pager.html" import pager %}{{ pager(findings_pages) }}
     {% else %}<div class="card"><p class="muted" style="margin:0">Tidak ada findings.</p></div>{% endif %}
 
     <h2>Logs <span class="cap">realtime (batch tiap siklus agent)</span></h2>
@@ -159,23 +160,38 @@
           {% if app.endpoints %}{% for e in app.endpoints %}{{ e.domain or e.url }}{{ " · " if not loop.last }}{% endfor %}
           {% else %}—{% endif %}</td></tr>
         <tr><td class="muted">Dependencies</td><td>{{ app.dependencies|length }}</td></tr>
-        <tr><td class="muted">Repo</td><td>
-          {% if repo_info.linked %}<a href="{{ repo_info.url }}">{{ repo_info.url.split('/')[-1] }}</a> <span class="muted">({{ repo_info.branch }})</span>
-          {% else %}—{% endif %}</td></tr>
+        <tr><td class="muted">Repo</td><td id="repo-cell">
+          {% if repo_info.linked %}
+            <code>{{ repo_info.url }}</code> <span class="muted">({{ repo_info.branch }})</span>
+            {% if repo_info.token_configured %}<span class="pill healthy">own token</span>{% else %}<span class="pill unknown">server cred</span>{% endif %}
+          {% else %}—{% endif %}
+        </td></tr>
         <tr><td class="muted">DORA 30d</td><td>
           {% if dora %}{{ dora.deployments }} deploys · CFR {{ "%.0f%%"|format(dora.change_failure_rate * 100) if dora.change_failure_rate is not none else '—' }}{% else %}—{% endif %}</td></tr>
       </table>
       {% if repo_info.linked %}
-      <form hx-post="{{ u('/repo') }}/{{ app.slug }}/sync" hx-target="#repo-sync-msg" style="margin-top:8px">
+      <form hx-post="{{ u('/repo') }}/{{ app.slug }}/sync" hx-target="#repo-sync-msg" style="margin-top:8px;display:inline">
         <button type="submit" class="btn-ghost">Sync repo</button>
       </form>
+      <a href="{{ repo_info.url }}" target="_blank" class="muted" style="font-size:12px;margin-left:8px">buka di GitHub ↗</a>
       <span id="repo-sync-msg" class="muted"></span>
-      {% elif app.discovery.value == 'manual' %}
-      <form hx-post="{{ u('/repo') }}/{{ app.slug }}/link" hx-target="#repo-sync-msg" style="display:flex;gap:8px;margin-top:8px">
-        <input name="url" placeholder="https://github.com/user/repo" style="flex:1">
-        <button type="submit" class="btn-ghost">Link repo</button>
-      </form>
       {% endif %}
+      <details style="margin-top:8px" {% if not repo_info.linked %}open{% endif %}>
+        <summary class="muted" style="cursor:pointer">
+          {{ "Ganti / edit repository" if repo_info.linked else "+ Link repository" }}
+        </summary>
+        <form hx-post="{{ u('/repo') }}/{{ app.slug }}/link" hx-target="#repo-sync-msg"
+              style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <input name="url" value="{{ repo_info.url if repo_info.linked else '' }}"
+                 placeholder="https://github.com/user/repo" style="flex:1;min-width:220px" required>
+          <input name="branch" value="{{ repo_info.branch if repo_info.linked else 'main' }}" style="width:90px">
+          <button type="submit" class="btn-ghost">{{ "Update" if repo_info.linked else "Link" }}</button>
+        </form>
+        <p class="muted" style="margin:6px 0 0;font-size:12px">
+          Repo dipakai untuk korelasi commit ↔ incident, regression check, dan konteks AI.
+          Dukungan penuh untuk app hasil deteksi maupun External Resource.
+        </p>
+      </details>
     </div>
 
     <h2>Incidents <span class="cap">10 terakhir</span></h2>
@@ -226,7 +242,7 @@
     </table>
     {% else %}<div class="card"><p class="muted" style="margin:0">Belum ada postmortem — dibuat otomatis saat incident selesai.</p></div>{% endif %}
 
-    <h2>Timeline <span class="cap">50 event terakhir</span></h2>
+    <h2>Timeline <span class="cap">semua event, 10 per halaman</span></h2>
     {% if timeline %}
     <table>
       <tr><th>Waktu</th><th>Event</th></tr>
@@ -237,6 +253,7 @@
       </tr>
       {% endfor %}
     </table>
+    {% from "_pager.html" import pager %}{{ pager(timeline_pages) }}
     {% else %}<div class="card"><p class="muted" style="margin:0">Belum ada timeline events.</p></div>{% endif %}
   </div>
 </div>

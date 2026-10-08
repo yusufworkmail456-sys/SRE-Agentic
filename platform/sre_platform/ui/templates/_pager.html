@@ -1,0 +1,11 @@
+{% macro pager(nav) %}
+{% if nav and nav.pages > 1 %}
+<div class="pager">
+  {% if nav.prev_url %}<a class="pager-link" href="{{ nav.prev_url }}">‹ Sebelumnya</a>
+  {% else %}<span class="pager-link off">‹ Sebelumnya</span>{% endif %}
+  <span class="muted">Hal {{ nav.page }}/{{ nav.pages }}</span>
+  {% if nav.next_url %}<a class="pager-link" href="{{ nav.next_url }}">Berikutnya ›</a>
+  {% else %}<span class="pager-link off">Berikutnya ›</span>{% endif %}
+</div>
+{% endif %}
+{% endmacro %}
