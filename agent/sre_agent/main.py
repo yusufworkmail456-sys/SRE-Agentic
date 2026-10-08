@@ -93,7 +93,10 @@ class Agent:
                     prev_disk_ts = now
                 metrics_payload["host_saturation"] = saturation
                 payload["metrics"] = metrics_payload
-                red_entries, endpoint_stats = collect_nginx_red(window_s=self.cfg.collect_interval_s * 10)
+                red_entries, endpoint_stats = collect_nginx_red(
+                    window_s=self.cfg.collect_interval_s * 10,
+                    route_ignore_prefixes=self.cfg.route_ignore_prefixes,
+                )
                 payload["red"] = red_entries
                 payload["endpoints"] = endpoint_stats
                 if now - _last_proc_collect >= 60:

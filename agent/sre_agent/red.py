@@ -55,6 +55,7 @@ def parse_access_log(
     window_s: int = 300,
     now: datetime | None = None,
     port_map: dict[str, int] | None = None,
+    route_ignore_prefixes: list[str] | None = None,
 ) -> tuple[dict[int | None, Bucket], list[dict]]:
     """text -> ({upstream_port: Bucket}, per-endpoint stats).
 
@@ -102,6 +103,10 @@ def parse_access_log(
         # ---- per-endpoint aggregation (M12)
         method = m.group("method") or "?"
         route = _normalize_route(unquote(m.group("path")))
+        if route_ignore_prefixes and any(
+            route.startswith(p) for p in route_ignore_prefixes
+        ):
+            continue
         key = f"{method} {route}"
         ep = endpoints.setdefault(
             key, {"route": route, "method": method, "port": port, "requests": 0,
@@ -208,11 +213,13 @@ def collect_nginx_red(
     log_paths: list[str] | None = None,
     window_s: int = 300,
     port_map: dict[str, int] | None = None,
+    route_ignore_prefixes: list[str] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Returns (RED entries, per-endpoint stats)."""
     paths = log_paths or ["/var/log/nginx/access.log"]
     text = "\n".join(tail_text(p) for p in paths)
     if not text.strip():
         return [], []
-    buckets, endpoints = parse_access_log(text, window_s=window_s, port_map=port_map)
+    buckets, endpoints = parse_access_log(text, window_s=window_s, port_map=port_map,
+                                          route_ignore_prefixes=route_ignore_prefixes)
     return summarize(buckets, window_s), endpoints

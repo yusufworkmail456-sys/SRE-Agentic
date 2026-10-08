@@ -34,6 +34,11 @@ class AgentConfig:
     ignore_users: list[str] = field(
         default_factory=lambda: ["messagebus", "systemd-network", "systemd-resolve", "nobody"]
     )
+    # Route prefixes excluded from per-endpoint stats (SSE/websocket/long-poll
+    # are long-lived by design and would always top the "slowest" list).
+    route_ignore_prefixes: list[str] = field(
+        default_factory=lambda: ["/api/events", "/ws", "/stream", "/socket.io"]
+    )
 
     @property
     def headers(self) -> dict[str, str]:
