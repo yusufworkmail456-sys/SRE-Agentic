@@ -83,10 +83,14 @@ def ingest(
     if req.health_checks:
         result["health_checks"] = apply_health_checks(db, server, req.health_checks)
     if req.metrics:
-        apply_server_metrics(db, server, req.metrics)
-        from ..metrics import store_server_metrics, store_app_red
+        from ..metrics import store_server_metrics
 
-        store_server_metrics(db, server, req.metrics)
+        # Agent nests host metrics under "server" (payload["metrics"]["server"]);
+        # accept both shapes so host CPU/mem/disk columns actually fill.
+        host_metrics = req.metrics.get("server", req.metrics)
+        if isinstance(host_metrics, dict) and host_metrics:
+            apply_server_metrics(db, server, host_metrics)
+            store_server_metrics(db, server, host_metrics)
     if req.red:
         from ..metrics import store_app_red
 
