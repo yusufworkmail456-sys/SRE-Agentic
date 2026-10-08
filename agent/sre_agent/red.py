@@ -31,6 +31,14 @@ class Bucket:
     latencies_ms: list[float] = field(default_factory=list)
 
 
+# Apdex buckets (seconds). T = 1.3s (satisfying <= T, tolerating <= 4T).
+APDEX_T_S = 1.3
+# Histogram buckets in ms (Prometheus-style, http_request_duration).
+HIST_BUCKETS_MS = (50, 100, 250, 500, 1000, 2500, 5000, 10000)
+MAX_ENDPOINTS = 12
+
+
+
 def _parse_ts(raw: str) -> datetime:
     return datetime.strptime(raw, "%d/%b/%Y:%H:%M:%S %z").astimezone(UTC)
 
@@ -47,12 +55,18 @@ def parse_access_log(
     window_s: int = 300,
     now: datetime | None = None,
     port_map: dict[str, int] | None = None,
-) -> dict[int | None, Bucket]:
-    """text -> {upstream_port: Bucket}. Only lines inside the window count."""
+) -> tuple[dict[int | None, Bucket], list[dict]]:
+    """text -> ({upstream_port: Bucket}, per-endpoint stats).
+
+    Only lines inside the window count. Endpoint key = upstream port + method
+    + normalized route (numeric ids collapsed) so dashboards show per-route
+    latency/errors like mainstream APMs.
+    """
     now = now or datetime.now(UTC)
     cutoff = now - timedelta(seconds=window_s)
     port_map = port_map or {}
     buckets: dict[int | None, Bucket] = {}
+    endpoints: dict[str, dict] = {}
 
     for raw in text.splitlines()[-20000:]:
         m = LOG_LINE.search(raw)
@@ -66,9 +80,6 @@ def parse_access_log(
             continue
         status = m.group("status")
         klass = f"{status[0]}xx"
-        # latency: nginx $request_time (s) when present in extended formats;
-        # absent in combined format, so derive from bytes as a last resort? No —
-        # fabricating latency is worse than missing it. Only real fields count.
         lat_ms: float | None = None
         rt = re.search(r"rt=(\d+\.\d+)", raw)
         if rt:
@@ -88,9 +99,73 @@ def parse_access_log(
         if lat_ms is not None:
             bucket.latencies_ms.append(lat_ms)
 
+        # ---- per-endpoint aggregation (M12)
+        method = m.group("method") or "?"
+        route = _normalize_route(unquote(m.group("path")))
+        key = f"{method} {route}"
+        ep = endpoints.setdefault(
+            key, {"route": route, "method": method, "port": port, "requests": 0,
+                  "status": {}, "latencies_ms": []}
+        )
+        ep["requests"] += 1
+        ep["status"][klass] = ep["status"].get(klass, 0) + 1
+        if lat_ms is not None:
+            ep["latencies_ms"].append(lat_ms)
+
     for bucket in buckets.values():
         bucket.latencies_ms.sort()
-    return buckets
+    ranked = _rank_endpoints(endpoints)
+    return buckets, ranked
+
+
+_ID_PARTS = re.compile(r"/\d+(?=/|$)")
+_UUID = re.compile(r"/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=/|$)", re.I)
+_HEX32 = re.compile(r"/[0-9a-f]{16,}(?=/|$)", re.I)
+
+
+def _normalize_route(path: str) -> str:
+    """Collapse ids/uuids/hashes so routes aggregate across requests."""
+    path = _UUID.sub("/{id}", path)
+    path = _HEX32.sub("/{id}", path)
+    path = _ID_PARTS.sub("/{id}", path)
+    # strip query string remnants
+    return path.split("?")[0][:120]
+
+
+def _rank_endpoints(endpoints: dict[str, dict]) -> list[dict]:
+    """Top endpoints by requests; each carries p95, error rate, apdex, histogram."""
+    def _pctl(sorted_vals: list[float], pct: float) -> float | None:
+        if not sorted_vals:
+            return None
+        idx = min(len(sorted_vals) - 1, max(0, round(pct / 100 * (len(sorted_vals) - 1))))
+        return sorted_vals[idx]
+
+    out = []
+    for key, ep in endpoints.items():
+        lats = sorted(ep["latencies_ms"])
+        total = ep["requests"]
+        errs = ep["status"].get("4xx", 0) + ep["status"].get("5xx", 0)
+        satisfied = sum(1 for v in lats if v <= APDEX_T_S * 1000)
+        tolerating = sum(1 for v in lats if APDEX_T_S * 1000 < v <= APDEX_T_S * 4 * 1000)
+        hist = {str(b): 0 for b in HIST_BUCKETS_MS}
+        for v in lats:
+            for b in HIST_BUCKETS_MS:
+                if v <= b:
+                    hist[str(b)] += 1
+        out.append({
+            "route": ep["route"],
+            "method": ep["method"],
+            "port": ep["port"],
+            "requests": total,
+            "err_rate": round(errs / total, 4),
+            "p50_ms": _pctl(lats, 50),
+            "p95_ms": _pctl(lats, 95),
+            "p99_ms": _pctl(lats, 99),
+            "apdex": round((satisfied + tolerating / 2) / total, 3) if total else None,
+            "histogram": hist,
+        })
+    out.sort(key=lambda x: x["requests"], reverse=True)
+    return out[:MAX_ENDPOINTS]
 
 
 def summarize(buckets: dict[int | None, Bucket], window_s: int = 300) -> list[dict]:
@@ -133,9 +208,11 @@ def collect_nginx_red(
     log_paths: list[str] | None = None,
     window_s: int = 300,
     port_map: dict[str, int] | None = None,
-) -> list[dict]:
+) -> tuple[list[dict], list[dict]]:
+    """Returns (RED entries, per-endpoint stats)."""
     paths = log_paths or ["/var/log/nginx/access.log"]
     text = "\n".join(tail_text(p) for p in paths)
     if not text.strip():
-        return []
-    return summarize(parse_access_log(text, window_s=window_s, port_map=port_map), window_s)
+        return [], []
+    buckets, endpoints = parse_access_log(text, window_s=window_s, port_map=port_map)
+    return summarize(buckets, window_s), endpoints

@@ -21,6 +21,7 @@ from .models import (
     HealthCheck,
     MetricPoint,
     Severity,
+    SLO,
     TimelineEvent,
 )
 
@@ -256,7 +257,153 @@ def rule_security_root_process(db: Session, app_row: Application) -> None:
         _resolve_if_recovered(db, app_row, rule)
 
 
-RULES = [rule_error_rate, rule_latency_zscore, rule_disk_capacity, rule_health_flap, rule_security_root_process]
+# ------------------------------------------------------ M12: saturation + no-data
+def rule_host_saturation(db: Session, app_row: Application) -> None:
+    """USE saturation: high load vs cores, swap pressure, net errors/drops."""
+    if not app_row.server_id:
+        return
+    point = db.scalars(
+        select(MetricPoint)
+        .where(MetricPoint.server_id == app_row.server_id)
+        .order_by(MetricPoint.ts.desc())
+        .limit(1)
+    ).first()
+    if point is None:
+        _resolve_if_recovered(db, app_row, "host_saturation")
+        return
+    problems: list[str] = []
+    evidence: list[dict] = []
+    if point.load5 is not None and point.load5 >= 4.0:
+        problems.append(f"load5 {point.load5:.1f} tinggi")
+        evidence.append({"source": "metric_point", "ref": f"server:{app_row.server_id}:load5",
+                         "value": point.load5})
+    if (point.swap_pct or 0) >= 50:
+        problems.append(f"swap {point.swap_pct:.0f}%")
+        evidence.append({"source": "metric_point", "ref": f"server:{app_row.server_id}:swap_pct",
+                         "value": point.swap_pct})
+    if (point.net_drops or 0) >= 100 or (point.net_errs or 0) >= 100:
+        problems.append(f"net drop/err {point.net_drops}/{point.net_errs}")
+        evidence.append({"source": "metric_point", "ref": f"server:{app_row.server_id}:net_drops",
+                         "value": {"drops": point.net_drops, "errs": point.net_errs}})
+    if problems:
+        _upsert_finding(
+            db, app_row, "host_saturation",
+            {
+                "category": FindingCategory.capacity,
+                "severity": Severity.critical if (point.swap_pct or 0) >= 80 else Severity.warning,
+                "confidence": Confidence.confirmed,
+                "title": f"Host saturation: {', '.join(problems)}",
+                "observation": (
+                    f"load {point.load1}/{point.load5}/{point.load15}, swap {point.swap_pct or 0:.0f}%, "
+                    f"disk io {point.disk_read_kbps or 0:.0f}/{point.disk_write_kbps or 0:.0f} KB/s, "
+                    f"net drops/errors {point.net_drops or 0}/{point.net_errs or 0}."
+                ),
+                "probable_cause": "Resource contention: CPU saturation, memory pressure (swap), or network faults.",
+                "recommendation": "Identify top process (panel Processes), check for runaway workers; "
+                                  "scale up or throttle before latency propagates to users.",
+                "evidence": evidence,
+            },
+        )
+    else:
+        _resolve_if_recovered(db, app_row, "host_saturation")
+
+
+def rule_no_data(db: Session, app_row: Application) -> None:
+    """Agent silent = blind spot. Alert when no app metric for 10 minutes."""
+    rule = "no_data"
+    latest = metrics_svc.latest_points(db, app_row.id, limit=1)
+    if not latest:
+        age_min = None
+    else:
+        ts = latest[0].ts if latest[0].ts.tzinfo else latest[0].ts.replace(tzinfo=UTC)
+        age_min = (datetime.now(UTC) - ts).total_seconds() / 60
+    if age_min is None or age_min >= 10:
+        _upsert_finding(
+            db, app_row, rule,
+            {
+                "category": FindingCategory.operational,
+                "severity": Severity.critical if (age_min or 999) >= 30 else Severity.warning,
+                "confidence": Confidence.confirmed,
+                "title": "No metric data" + (f" for {age_min:.0f} minutes" if age_min else ""),
+                "observation": (
+                    f"Last metric sample {age_min:.0f}m ago" if age_min
+                    else "No metric sample has ever been received."
+                ),
+                "probable_cause": "sre-agent stopped, network to platform broken, or app produced no traffic.",
+                "recommendation": "Check agent: `systemctl status sre-agent` on the host; verify outbound "
+                                  "connectivity to the platform. Blind monitoring = no monitoring.",
+                "evidence": [{"source": "metric_point", "ref": f"app:{app_row.id}:last_seen",
+                              "value": age_min}],
+            },
+        )
+    else:
+        _resolve_if_recovered(db, app_row, rule)
+
+
+def rule_fast_burn(db: Session, app_row: Application) -> None:
+    """Multi-window error-budget burn (5m fast + 1h slow) on error-rate SLOs.
+
+    Classic SRE burn-rate alerting: 14x/1h fast burn alone is noisy, so require
+    the 1h window also burning >= 6x before firing.
+    """
+    rule = "slo_fast_burn"
+    slos = db.scalars(
+        select(SLO).where(
+            SLO.application_id == app_row.id,
+            SLO.enabled == True,  # noqa: E712
+            SLO.metric == "error_rate",
+        )
+    ).all()
+    if not slos:
+        return
+    now = datetime.now(UTC)
+    for slo_row in slos:
+        threshold = float(slo_row.threshold or 0.01)
+        budget = threshold  # allowed error rate; burn = actual / allowed
+        recent = [p.err_rate for p in metrics_svc.latest_points(db, app_row.id, limit=3)
+                  if p.err_rate is not None]
+        hourly = db.scalars(
+            select(MetricPoint).where(
+                MetricPoint.application_id == app_row.id,
+                MetricPoint.ts >= now - timedelta(hours=1),
+                MetricPoint.err_rate.is_not(None),
+            ).order_by(MetricPoint.ts)
+        ).all()
+        if len(recent) < 3 or len(hourly) < 4:
+            _resolve_if_recovered(db, app_row, rule)
+            continue
+        fast = sum(recent) / len(recent) / budget if budget else 0
+        slow = sum(p.err_rate or 0 for p in hourly) / len(hourly) / budget if budget else 0
+        if fast >= 14 and slow >= 6:
+            _upsert_finding(
+                db, app_row, rule,
+                {
+                    "category": FindingCategory.reliability,
+                    "severity": Severity.critical,
+                    "confidence": Confidence.confirmed,
+                    "title": f"Fast error-budget burn ({fast:.0f}x / 5m, {slow:.0f}x / 1h)",
+                    "observation": (
+                        f"Error rate burning the {slo_row.sli} budget {fast:.0f}x faster than "
+                        f"sustainable over 5 minutes and {slow:.0f}x over 1 hour "
+                        f"(threshold {threshold:.3f})."
+                    ),
+                    "probable_cause": "Sustained failure rate far above the SLO — regression, dependency outage, or capacity breach.",
+                    "recommendation": "Treat as incident: check deployments in the last hour, "
+                                      "roll back the most recent regression, or scale/mitigate now.",
+                    "evidence": [
+                        {"source": "metric_point", "ref": f"app:{app_row.id}:burn_5m", "value": round(fast, 1)},
+                        {"source": "metric_point", "ref": f"app:{app_row.id}:burn_1h", "value": round(slow, 1)},
+                        {"source": "slo", "ref": f"slo:{slo_row.id}", "value": {"sli": slo_row.sli,
+                                                                               "threshold": threshold}},
+                    ],
+                },
+            )
+        else:
+            _resolve_if_recovered(db, app_row, rule)
+
+
+RULES = [rule_error_rate, rule_latency_zscore, rule_disk_capacity, rule_health_flap,
+         rule_security_root_process, rule_host_saturation, rule_no_data, rule_fast_burn]
 
 
 def run_rules_for_app(db: Session, app_row: Application) -> list[str]:

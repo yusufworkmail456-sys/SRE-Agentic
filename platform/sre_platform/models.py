@@ -290,6 +290,15 @@ class MetricPoint(Base):
     fd_count: Mapped[int | None] = mapped_column(Integer)
     procs: Mapped[int | None] = mapped_column(Integer)
     raw: Mapped[dict] = mapped_column(JSON, default=dict)
+    # M12 saturation extras (USE): load, swap, disk io rates, net errors/drops
+    load1: Mapped[float | None] = mapped_column(Float)
+    load5: Mapped[float | None] = mapped_column(Float)
+    load15: Mapped[float | None] = mapped_column(Float)
+    swap_pct: Mapped[float | None] = mapped_column(Float)
+    disk_read_kbps: Mapped[float | None] = mapped_column(Float)
+    disk_write_kbps: Mapped[float | None] = mapped_column(Float)
+    net_errs: Mapped[int | None] = mapped_column(Integer)
+    net_drops: Mapped[int | None] = mapped_column(Integer)
 
 
 class MetricRollup5m(Base):
@@ -551,6 +560,50 @@ class AppReport(Base, TimestampMixin):
     window_minutes: Mapped[int] = mapped_column(Integer, default=120)
     doc: Mapped[dict] = mapped_column(JSON, default=dict)
     generated_by: Mapped[str | None] = mapped_column(String(64))
+
+
+class EndpointStat(Base):
+    """M12: per-endpoint RED/Apdex snapshot (one row per ingest cycle)."""
+
+    __tablename__ = "endpoint_stat"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    application_id: Mapped[int | None] = mapped_column(ForeignKey("application.id"), index=True)
+    server_id: Mapped[int | None] = mapped_column(ForeignKey("server.id"), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    route: Mapped[str] = mapped_column(String(200), index=True)
+    method: Mapped[str | None] = mapped_column(String(10))
+    requests: Mapped[int] = mapped_column(Integer, default=0)
+    err_rate: Mapped[float | None] = mapped_column(Float)
+    p50_ms: Mapped[float | None] = mapped_column(Float)
+    p95_ms: Mapped[float | None] = mapped_column(Float)
+    p99_ms: Mapped[float | None] = mapped_column(Float)
+    apdex: Mapped[float | None] = mapped_column(Float)
+    histogram: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class ProcessSnapshot(Base):
+    """M12: top processes per host (bounded, once per minute)."""
+
+    __tablename__ = "process_snapshot"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int | None] = mapped_column(ForeignKey("server.id"), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    rows: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class HostEvent(Base):
+    """M12: kernel/host events (OOM kills, segfaults, crash-loops)."""
+
+    __tablename__ = "host_event"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    server_id: Mapped[int | None] = mapped_column(ForeignKey("server.id"), index=True)
+    application_id: Mapped[int | None] = mapped_column(ForeignKey("application.id"), index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    kind: Mapped[str | None] = mapped_column(String(32))
+    summary: Mapped[str | None] = mapped_column(Text)
 
 
 class User(Base, TimestampMixin):

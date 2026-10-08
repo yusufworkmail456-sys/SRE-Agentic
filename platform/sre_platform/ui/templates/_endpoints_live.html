@@ -1,0 +1,39 @@
+{# Polled fragment: per-endpoint RED/Apdex table (M12). #}
+{% if endpoint_rows %}
+<table>
+  <tr><th>Endpoint</th><th>Req</th><th>Err rate</th><th>P50</th><th>P95</th><th>P99</th><th>Apdex</th><th>Distribusi latency</th></tr>
+  {% for e in endpoint_rows %}
+  <tr>
+    <td><code>{{ e.method }} {{ e.route }}</code></td>
+    <td>{{ e.requests }}</td>
+    <td class="{{ 'err' if e.err_rate and e.err_rate > 0.05 else 'muted' }}">{{ "%.1f%%"|format(e.err_rate * 100) if e.err_rate is not none else "—" }}</td>
+    <td>{{ "%.0fms"|format(e.p50_ms) if e.p50_ms else "—" }}</td>
+    <td>{{ "%.0fms"|format(e.p95_ms) if e.p95_ms else "—" }}</td>
+    <td>{{ "%.0fms"|format(e.p99_ms) if e.p99_ms else "—" }}</td>
+    <td>
+      {% if e.apdex is not none %}
+        <span class="pill {{ 'healthy' if e.apdex >= 0.9 else ('degraded' if e.apdex >= 0.7 else 'down') }}">{{ "%.2f"|format(e.apdex) }}</span>
+      {% else %}—{% endif %}
+    </td>
+    <td style="min-width:140px">
+      {% set hist = e.histogram or {} %}
+      {% set ns = namespace(total=0) %}
+      {% for _, cnt in hist.items() %}{% set ns.total = ns.total + cnt %}{% endfor %}
+      {% if ns.total > 0 %}
+      <div style="display:flex;height:10px;border-radius:5px;overflow:hidden;width:140px">
+        {% set colors = {'50':'#16a34a','100':'#22c55e','250':'#84cc16','500':'#eab308','1000':'#f59e0b','2500':'#f97316','5000':'#ef4444','10000':'#b91c1c'} %}
+        {% for b, cnt in hist.items() %}
+          {% if cnt > 0 %}
+          <div title="&le;{{ b }}ms: {{ cnt }}" style="width:{{ (cnt * 140 / ns.total)|round(1) }}%;background:{{ colors.get(b, '#94a3b8') }}"></div>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% else %}<span class="muted">tanpa rt data</span>{% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+<p class="muted">Apdex T=1.3s · histogram dari nginx $request_time · update {{ settings.ui_refresh_s }}s</p>
+{% else %}
+<p class="muted">Belum ada data per-endpoint — agent mengumpulkan dari nginx access log (butuh beberapa menit traffic).</p>
+{% endif %}

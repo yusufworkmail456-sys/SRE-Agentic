@@ -421,6 +421,35 @@ def create_app() -> FastAPI:
              "running_test": running, "latest_test": latest_done},
         )
 
+    @app.get("/applications/{slug}/endpoints", response_class=HTMLResponse)
+    def endpoints_fragment(slug: str, request: Request, db: Session = Depends(get_db)):
+        """Polled fragment: per-endpoint RED/Apdex table (M12, APM-style)."""
+        from .metrics import latest_endpoint_stats
+
+        app_row = db.scalar(select(Application).where(Application.slug == slug))
+        if app_row is None:
+            return HTMLResponse('<p class="muted">application not found</p>', status_code=404)
+        rows = latest_endpoint_stats(db, app_row.id)
+        return templates.TemplateResponse(
+            request, "_endpoints_live.html",
+            {"settings": settings, "app": app_row, "endpoint_rows": rows},
+        )
+
+    @app.get("/applications/{slug}/processes", response_class=HTMLResponse)
+    def processes_fragment(slug: str, request: Request, db: Session = Depends(get_db)):
+        """Polled fragment: top processes + recent host events (M12)."""
+        from .metrics import latest_host_events, latest_process_snapshot
+
+        app_row = db.scalar(select(Application).where(Application.slug == slug))
+        if app_row is None:
+            return HTMLResponse('<p class="muted">application not found</p>', status_code=404)
+        return templates.TemplateResponse(
+            request, "_processes_live.html",
+            {"settings": settings, "app": app_row,
+             "proc_rows": latest_process_snapshot(db, app_row.server_id),
+             "events": latest_host_events(db, app_row.server_id)},
+        )
+
     @app.get("/applications/{slug}/logs", response_class=HTMLResponse)
     def logs_fragment(
         slug: str, request: Request, db: Session = Depends(get_db), page: int = 1

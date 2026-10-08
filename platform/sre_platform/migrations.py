@@ -20,6 +20,16 @@ ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "threshold": "FLOAT",
         "comparison": "VARCHAR(4) DEFAULT ''",
     },
+    "metric_point": {
+        "load1": "FLOAT",
+        "load5": "FLOAT",
+        "load15": "FLOAT",
+        "swap_pct": "FLOAT",
+        "disk_read_kbps": "FLOAT",
+        "disk_write_kbps": "FLOAT",
+        "net_errs": "INTEGER",
+        "net_drops": "INTEGER",
+    },
 }
 
 

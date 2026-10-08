@@ -66,6 +66,9 @@ class IngestRequest(BaseModel):
     discovery: list[dict] | None = None
     metrics: dict | None = None
     red: list[dict] | None = None
+    endpoints: list[dict] | None = None  # M12 per-endpoint stats
+    processes: list[dict] | None = None  # M12 top processes
+    events: list[dict] | None = None     # M12 kernel/host events
     health_checks: list[dict] | None = None
     logs: list[dict] | None = None
     containers: dict | None = None  # {"metrics": [...], "states": [...]}
@@ -85,16 +88,33 @@ def ingest(
     if req.metrics:
         from ..metrics import store_server_metrics
 
-        # Agent nests host metrics under "server" (payload["metrics"]["server"]);
-        # accept both shapes so host CPU/mem/disk columns actually fill.
-        host_metrics = req.metrics.get("server", req.metrics)
-        if isinstance(host_metrics, dict) and host_metrics:
+        # Agent payload: metrics={"server": {...}, "host_saturation": {...}}.
+        # Merge host saturation into the server metrics row (USE columns).
+        host_metrics = dict(req.metrics.get("server") or {})
+        sat = req.metrics.get("host_saturation") or {}
+        for key in ("load1", "load5", "load15", "swap_pct", "disk_read_kbps",
+                    "disk_write_kbps", "net_errs", "net_drops"):
+            if key in sat and key not in host_metrics:
+                host_metrics[key] = sat[key]
+        if host_metrics:
             apply_server_metrics(db, server, host_metrics)
             store_server_metrics(db, server, host_metrics)
     if req.red:
         from ..metrics import store_app_red
 
         result["red_stored"] = store_app_red(db, server, req.red)
+    if req.endpoints:
+        from ..metrics import store_endpoint_stats
+
+        result["endpoints_stored"] = store_endpoint_stats(db, server, req.endpoints)
+    if req.processes:
+        from ..metrics import store_process_snapshot
+
+        store_process_snapshot(db, server, req.processes)
+    if req.events:
+        from ..metrics import store_host_events
+
+        result["events_stored"] = store_host_events(db, server, req.events)
     if req.logs:
         from ..logstore import store_log_batches
 

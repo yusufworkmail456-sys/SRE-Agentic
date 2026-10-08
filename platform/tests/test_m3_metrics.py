@@ -70,7 +70,7 @@ def test_red_stored_and_mapped_to_app(client, db):
 
     resp = client.post(
         "/api/agent/v1/ingest",
-        json={"red": [_red()], "metrics": {"cpu_pct": 11.5, "mem_pct": 40.0, "disk_pct": 50.0}},
+        json={"red": [_red()], "metrics": {"server": {"cpu_pct": 11.5, "mem_pct": 40.0, "disk_pct": 50.0}}},
         headers={"Authorization": f"Bearer {TOKEN}"},
     )
     assert resp.status_code == 200, resp.text

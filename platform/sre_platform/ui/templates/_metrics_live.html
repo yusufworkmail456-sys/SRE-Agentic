@@ -21,6 +21,15 @@
     <div class="big">{{ "%.0f%%"|format(server_point.cpu_pct) if server_point and server_point.cpu_pct is not none else "—" }} / {{ "%.0f%%"|format(server_point.mem_pct) if server_point and server_point.mem_pct is not none else "—" }}</div>
     <div class="muted">disk {{ "%.0f%%"|format(server_point.disk_pct) if server_point and server_point.disk_pct is not none else "—" }} · updated {{ server_point.ts.strftime("%H:%M:%S") if server_point and server_point.ts else "—" }}</div>
   </div>
+  <div class="card">
+    <h3>Saturation</h3>
+    <div class="big" {% if server_point and server_point.load5 is not none and server_point.load5 >= 4 %}style="color:var(--warn)"{% endif %}>
+      {{ "%.2f"|format(server_point.load5) if server_point and server_point.load5 is not none else "—" }}</div>
+    <div class="muted">
+      load5 · swap {{ "%.0f%%"|format(server_point.swap_pct) if server_point and server_point.swap_pct is not none else "—" }}
+      · io {{ "%.0f/%.0f"|format(server_point.disk_read_kbps, server_point.disk_write_kbps) if server_point and server_point.disk_read_kbps is not none and server_point.disk_write_kbps is not none else "—" }} KB/s
+    </div>
+  </div>
 </div>
 
 {% if points %}

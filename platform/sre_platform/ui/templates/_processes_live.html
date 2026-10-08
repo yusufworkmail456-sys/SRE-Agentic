@@ -1,0 +1,24 @@
+{# Polled fragment: top processes + kernel/host events (M12). #}
+{% if proc_rows %}
+<table>
+  <tr><th>Process</th><th>User</th><th>CPU total</th><th>RSS</th></tr>
+  {% for p in proc_rows[:8] %}
+  <tr>
+    <td><code>{{ p.name }}</code><div class="muted" style="font-size:11px">{{ (p.cmd or '')[:70] }}</div></td>
+    <td class="muted">{{ p.user }}</td>
+    <td>{{ "%.1fs"|format(p.cpu_s) if p.cpu_s is not none else "—" }}</td>
+    <td>{{ "%.0fMB"|format(p.rss_mb) if p.rss_mb is not none else "—" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">Belum ada snapshot proses.</p>{% endif %}
+
+{% if events %}
+<h3 style="font-size:12px;text-transform:uppercase;color:var(--muted);margin:12px 0 6px">⚠ Host events (OOM / segfault / crash)</h3>
+{% for ev in events %}
+<div class="action action-warning">
+  <span class="dot dot-warn"></span>
+  <span><code>{{ ev.kind }}</code> {{ ev.summary[:200] }}<div class="muted">{{ ev.ts.strftime("%m-%d %H:%M") if ev.ts else "" }}</div></span>
+</div>
+{% endfor %}
+{% endif %}

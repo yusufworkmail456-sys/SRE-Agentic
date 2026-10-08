@@ -5,8 +5,15 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-
-from .models import Application, MetricPoint, MetricRollup5m, Server
+from .models import (
+    Application,
+    EndpointStat,
+    HostEvent,
+    MetricPoint,
+    MetricRollup5m,
+    ProcessSnapshot,
+    Server,
+)
 
 
 def store_server_metrics(db: Session, server: Server, metrics: dict) -> None:
@@ -20,6 +27,14 @@ def store_server_metrics(db: Session, server: Server, metrics: dict) -> None:
             net_rx_kb=metrics.get("net_rx_kb"),
             net_tx_kb=metrics.get("net_tx_kb"),
             procs=metrics.get("procs"),
+            load1=metrics.get("load1"),
+            load5=metrics.get("load5"),
+            load15=metrics.get("load15"),
+            swap_pct=metrics.get("swap_pct"),
+            disk_read_kbps=metrics.get("disk_read_kbps"),
+            disk_write_kbps=metrics.get("disk_write_kbps"),
+            net_errs=metrics.get("net_errs"),
+            net_drops=metrics.get("net_drops"),
             raw=metrics,
         )
     )
@@ -58,6 +73,83 @@ def store_app_red(db: Session, server: Server, red_entries: list[dict]) -> int:
                 p99_ms=entry.get("p99_ms"),
                 raw=entry,
             )
+        )
+        stored += 1
+    return stored
+
+
+def _app_by_port(db: Session, server: Server, port: int | None) -> Application | None:
+    if port is None:
+        return None
+    apps = db.scalars(select(Application).where(Application.server_id == server.id)).all()
+    for app_row in apps:
+        for workload in app_row.workloads:
+            for instance in workload.instances:
+                if instance.listen_port == port:
+                    return app_row
+    return None
+
+
+def store_endpoint_stats(db: Session, server: Server, endpoints: list[dict]) -> int:
+    """M12: persist per-endpoint RED/Apdex rows (bounded, most recent window)."""
+    stored = 0
+    now = datetime.now(UTC)
+    app_cache: dict[int | None, Application | None] = {}
+    for entry in endpoints[:24]:
+        port = entry.get("port")
+        if port not in app_cache:
+            app_cache[port] = _app_by_port(db, server, port)
+        app_row = app_cache[port]
+        db.add(
+            EndpointStat(
+                application_id=app_row.id if app_row else None,
+                server_id=server.id,
+                ts=now,
+                route=str(entry.get("route", "?"))[:200],
+                method=str(entry.get("method", "?"))[:10],
+                requests=int(entry.get("requests") or 0),
+                err_rate=entry.get("err_rate"),
+                p50_ms=entry.get("p50_ms"),
+                p95_ms=entry.get("p95_ms"),
+                p99_ms=entry.get("p99_ms"),
+                apdex=entry.get("apdex"),
+                histogram=entry.get("histogram") or {},
+            )
+        )
+        stored += 1
+    return stored
+
+
+def store_process_snapshot(db: Session, server: Server, processes: list[dict]) -> None:
+    db.add(ProcessSnapshot(server_id=server.id, rows=processes[:16]))
+
+
+def store_host_events(db: Session, server: Server, events: list[dict]) -> int:
+    """Dedupe within the last hour; new events also become timeline entries."""
+    from .services import touch_timeline
+
+    stored = 0
+    apps = db.scalars(select(Application).where(Application.server_id == server.id)).all()
+    for event in events[:20]:
+        summary = str(event.get("summary", ""))[:400]
+        kind = str(event.get("kind", "kernel"))
+        hour_ago = datetime.now(UTC) - timedelta(hours=1)
+        db.flush()  # make earlier inserts in this session visible to the dup query
+        dup = db.scalar(
+            select(HostEvent.id).where(
+                HostEvent.server_id == server.id,
+                HostEvent.kind == kind,
+                HostEvent.summary == summary,
+                HostEvent.ts >= hour_ago,
+            )
+        )
+        if dup:
+            continue
+        db.add(HostEvent(server_id=server.id, kind=kind, summary=summary))
+        db.flush()
+        touch_timeline(
+            db, apps[0].id if apps else None, "host_event",
+            f"[{kind}] {summary[:160]}", actor="agent",
         )
         stored += 1
     return stored
@@ -157,3 +249,50 @@ def latest_points(db: Session, app_id: int, limit: int = 60) -> list[MetricPoint
         .order_by(MetricPoint.ts.desc())
         .limit(limit)
     ).all()
+
+
+# ---------------------------------------------------------------- M12 queries
+def latest_endpoint_stats(db: Session, app_id: int, max_age_min: int = 15, limit: int = 12) -> list[EndpointStat]:
+    """Most recent EndpointStat per route (dedup), within the freshness window."""
+    since = datetime.now(UTC) - timedelta(minutes=max_age_min)
+    rows = db.scalars(
+        select(EndpointStat)
+        .where(EndpointStat.application_id == app_id, EndpointStat.ts >= since)
+        .order_by(EndpointStat.ts.desc())
+        .limit(120)
+    ).all()
+    seen: set[str] = set()
+    out: list[EndpointStat] = []
+    for row in rows:
+        key = f"{row.method} {row.route}"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def latest_process_snapshot(db: Session, server_id: int | None, max_age_min: int = 10) -> list[dict]:
+    if server_id is None:
+        return []
+    since = datetime.now(UTC) - timedelta(minutes=max_age_min)
+    row = db.scalars(
+        select(ProcessSnapshot)
+        .where(ProcessSnapshot.server_id == server_id, ProcessSnapshot.ts >= since)
+        .order_by(ProcessSnapshot.ts.desc())
+        .limit(1)
+    ).first()
+    return list(row.rows or []) if row else []
+
+
+def latest_host_events(db: Session, server_id: int | None, limit: int = 6) -> list[HostEvent]:
+    if server_id is None:
+        return []
+    return list(db.scalars(
+        select(HostEvent)
+        .where(HostEvent.server_id == server_id)
+        .order_by(HostEvent.ts.desc())
+        .limit(limit)
+    ).all())

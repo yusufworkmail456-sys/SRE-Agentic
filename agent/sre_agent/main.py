@@ -13,6 +13,7 @@ from pathlib import Path
 import psutil
 
 from . import dockercol
+from . import advcollect
 from .config import AgentConfig, load_config
 from .discovery import discover, hostname
 from .executor import execute_action
@@ -65,6 +66,9 @@ class Agent:
     def run_forever(self) -> None:  # pragma: no cover - daemon loop
         self._ensure_registered()
         last_discovery = 0.0
+        _last_proc_collect = 0.0
+        prev_disk_io: tuple[float, float] | None = None
+        prev_disk_ts: float | None = None
         while True:
             try:
                 payload = {"server_id": self.server_id, "ts": time.time()}
@@ -74,8 +78,28 @@ class Agent:
                     fps += dockercol.container_fingerprints()
                     payload["discovery"] = fps
                     last_discovery = now
-                payload["metrics"] = {"server": collect_server_metrics()}
-                payload["red"] = collect_nginx_red(window_s=self.cfg.collect_interval_s * 10)
+                metrics_payload = {"server": collect_server_metrics()}
+                saturation = advcollect.collect_saturation()
+                # derive instantaneous disk I/O rates from psutil counters
+                if prev_disk_io and prev_disk_ts and now > prev_disk_ts:
+                    dt = now - prev_disk_ts
+                    if "disk_read_bytes" in saturation:
+                        saturation["disk_read_kbps"] = round(
+                            (saturation["disk_read_bytes"] - prev_disk_io[0]) / dt / 1024, 1)
+                        saturation["disk_write_kbps"] = round(
+                            (saturation["disk_write_bytes"] - prev_disk_io[1]) / dt / 1024, 1)
+                if "disk_read_bytes" in saturation:
+                    prev_disk_io = (saturation["disk_read_bytes"], saturation["disk_write_bytes"])
+                    prev_disk_ts = now
+                metrics_payload["host_saturation"] = saturation
+                payload["metrics"] = metrics_payload
+                red_entries, endpoint_stats = collect_nginx_red(window_s=self.cfg.collect_interval_s * 10)
+                payload["red"] = red_entries
+                payload["endpoints"] = endpoint_stats
+                if now - _last_proc_collect >= 60:
+                    payload["processes"] = advcollect.collect_processes()
+                    payload["events"] = advcollect.collect_kernel_events()
+                    _last_proc_collect = now
                 payload["logs"] = self._collect_logs()
                 payload["health_checks"] = self._probe_listening_ports() + self._probe_http_targets()
                 containers = dockercol.list_containers()

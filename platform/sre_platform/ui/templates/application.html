@@ -39,6 +39,13 @@
   {% include "_metrics_live.html" %}
 </div>
 
+<h2>Endpoints <span class="cap">per-route latency, error &amp; Apdex — APM style</span></h2>
+<div id="endpoints-panel"
+     hx-get="{{ u('/applications') }}/{{ app.slug }}/endpoints"
+     hx-trigger="every 60s" hx-swap="innerHTML">
+  <p class="muted">memuat…</p>
+</div>
+
 <h2>Quick Application Report
   <span class="cap">snapshot performa + findings + SLO saat ini, oleh AI Agent</span>
 </h2>
@@ -192,6 +199,13 @@
           Dukungan penuh untuk app hasil deteksi maupun External Resource.
         </p>
       </details>
+    </div>
+
+    <h2>Processes &amp; Host Events <span class="cap">top CPU + OOM/segfault/crash, update 60s</span></h2>
+    <div class="card"
+         hx-get="{{ u('/applications') }}/{{ app.slug }}/processes"
+         hx-trigger="every 60s" hx-swap="innerHTML">
+      <p class="muted" style="margin:0">memuat…</p>
     </div>
 
     <h2>Incidents <span class="cap">10 terakhir</span></h2>
