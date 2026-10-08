@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from .api import agent as agent_api
 from .api import apps as apps_api
 from .api import ask as ask_api
+from .api import m11 as m11_api
 from .api import ops as ops_api
 from .api import postmortem as pm_api
 from .api import repo as repo_api
@@ -116,6 +117,7 @@ def create_app() -> FastAPI:
     app.include_router(apps_api.router)
     app.include_router(agent_api.router)
     app.include_router(ask_api.router)
+    app.include_router(m11_api.router)
     app.include_router(ops_api.router)
     app.include_router(pm_api.router)
     app.include_router(repo_api.router)
@@ -193,6 +195,19 @@ def create_app() -> FastAPI:
                     "text": f"{row['app'].name} DOWN — buka dashboard, cek incident yang sedang berjalan",
                     "href": f"/applications/{row['app'].slug}",
                 })
+        # Quick reminders (SLO breach / recurring error) — highest signal of the M11 features
+        from .quickreminders import active_quick_findings
+
+        for app_row in apps:
+            if not app_row.confirmed:
+                continue
+            for finding in active_quick_findings(db, app_row.id):
+                kind = "SLO breach" if (finding.rule_key or "").startswith("slo_breach") else "error berulang"
+                actions.append({
+                    "level": "warning" if finding.severity.value != "critical" else "critical",
+                    "text": f"{app_row.name}: {kind} — {finding.title}",
+                    "href": f"/applications/{app_row.slug}",
+                })
         for row in attention:
             if row["incidents"] and row["app"].status.value != "down":
                 actions.append({
@@ -230,6 +245,7 @@ def create_app() -> FastAPI:
             "overview.html",
             {
                 "settings": settings,
+                "nav": "overview",
                 "counts": counts,
                 "total": len(apps),
                 "attention": attention,
@@ -253,6 +269,7 @@ def create_app() -> FastAPI:
             "discovery.html",
             {
                 "settings": settings,
+                "nav": "discovery",
                 "candidates": candidates,
                 "servers": db.scalars(select(Server)).all(),
                 "apps": db.scalars(
@@ -320,6 +337,7 @@ def create_app() -> FastAPI:
             "topology.html",
             {
                 "settings": settings,
+                "nav": "topology",
                 "nodes": topo["nodes"],
                 "edges": topo["edges"],
                 "app_names": topo["app_names"],
@@ -357,6 +375,59 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.get("/applications/{slug}/reminders", response_class=HTMLResponse)
+    def reminders_fragment(slug: str, request: Request, db: Session = Depends(get_db)):
+        """Polled fragment: pinned quick reminders (M11)."""
+        from .quickreminders import active_quick_findings
+
+        app_row = db.scalar(select(Application).where(Application.slug == slug))
+        if app_row is None:
+            return HTMLResponse('<p class="muted">application not found</p>', status_code=404)
+        return templates.TemplateResponse(
+            request,
+            "_reminders_live.html",
+            {"settings": settings, "app": app_row,
+             "quick_reminders": active_quick_findings(db, app_row.id)},
+        )
+
+    @app.get("/applications/{slug}/perf-test", response_class=HTMLResponse)
+    def perf_test_fragment(slug: str, request: Request, db: Session = Depends(get_db)):
+        """Polled fragment: perf test state + live metrics during the window (M11)."""
+        from .quickreport import perf_test_state
+
+        app_row = db.scalar(select(Application).where(Application.slug == slug))
+        if app_row is None:
+            return HTMLResponse('<p class="muted">application not found</p>', status_code=404)
+        running, latest_done = perf_test_state(db, app_row.id)
+        return templates.TemplateResponse(
+            request,
+            "_perf_test.html",
+            {"settings": settings, "app": app_row,
+             "running_test": running, "latest_test": latest_done},
+        )
+
+    @app.get("/applications/{slug}/logs", response_class=HTMLResponse)
+    def logs_fragment(slug: str, request: Request, db: Session = Depends(get_db)):
+        """Polled fragment: realtime log batches (M11)."""
+        from .logstore import window_error_counts
+        from .models import LogBatch
+
+        app_row = db.scalar(select(Application).where(Application.slug == slug))
+        if app_row is None:
+            return HTMLResponse('<p class="muted">application not found</p>', status_code=404)
+        logs = db.scalars(
+            select(LogBatch)
+            .where(LogBatch.application_id == app_row.id)
+            .order_by(LogBatch.ts_end.desc())
+            .limit(8)
+        ).all()
+        return templates.TemplateResponse(
+            request,
+            "_logs_live.html",
+            {"settings": settings, "app": app_row, "logs": logs,
+             "log_counts": window_error_counts(db, app_row.id, minutes=60)},
+        )
+
     @app.get("/applications/{slug}", response_class=HTMLResponse)
     def application_detail(slug: str, request: Request, db: Session = Depends(get_db)):
         from .logstore import window_error_counts
@@ -365,6 +436,8 @@ def create_app() -> FastAPI:
         from .models import Deployment
         from .dora import dora_for_app
         from .postmortem import budget_context_for_recommendations, slo_summary_for_app
+        from .quickreminders import active_quick_findings
+        from .quickreport import latest_report, perf_test_state
 
         app_row = db.scalar(select(Application).where(Application.slug == slug))
         if app_row is None:
@@ -381,6 +454,8 @@ def create_app() -> FastAPI:
             if app_row.server_id
             else None
         )
+        running_test, latest_test = perf_test_state(db, app_row.id)
+        report = latest_report(db, app_row.id)
         return templates.TemplateResponse(
             request,
             "application.html",
@@ -400,6 +475,10 @@ def create_app() -> FastAPI:
                 "slos": slo_summary_for_app(db, app_row.id),
                 "budget_note": budget_context_for_recommendations(db, app_row),
                 "repo_info": _repo_summary(db, app_row),
+                "quick_reminders": active_quick_findings(db, app_row.id),
+                "running_test": running_test,
+                "latest_test": latest_test,
+                "report": report,
                 "postmortems": db.scalars(
                     select(Postmortem)
                     .where(Postmortem.incident_id.in_(

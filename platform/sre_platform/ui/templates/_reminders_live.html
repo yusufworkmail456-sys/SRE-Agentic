@@ -1,0 +1,29 @@
+{# Polled fragment: pinned quick reminders (SLO breach + recurring error) with AI recommendation. #}
+{% if quick_reminders %}
+  {% for f in quick_reminders %}
+  <div class="card reminder reminder-{{ f.severity.value }}" id="reminder-{{ f.id }}">
+    <div class="reminder-head">
+      {% if f.severity.value == 'critical' %}<span class="dot dot-crit"></span>
+      {% else %}<span class="dot dot-warn"></span>{% endif %}
+      <div style="flex:1">
+        <strong>{{ f.title }}</strong>
+        <div class="muted reminder-obs">{{ f.observation[:240] }}</div>
+      </div>
+      <span class="pill {{ 'down' if f.severity.value == 'critical' else 'degraded' }}">{{ 'SLO breach' if f.rule_key.startswith('slo_breach') else 'recurring error' }}</span>
+      <button class="btn-ghost" hx-post="{{ u('/api/apps') }}/{{ app.slug }}/reminders/{{ f.id }}/ack"
+              hx-target="#reminder-{{ f.id }}" hx-swap="outerHTML" title="Tandai sudah ditangani">✕</button>
+    </div>
+    {% if f.recommendation %}
+    <div class="reminder-rec">
+      <div class="muted rec-label">💡 Rekomendasi AI Agent</div>
+      <div>{{ f.recommendation }}</div>
+    </div>
+    {% endif %}
+    <div class="muted rec-meta">terakhir terlihat {{ f.last_seen.strftime('%H:%M:%S') }} UTC{% if f.rule_key %} · {{ f.rule_key.split(':')[0] }}{% endif %}</div>
+  </div>
+  {% endfor %}
+{% else %}
+<div class="card reminder reminder-ok">
+  <span class="dot dot-ok"></span> Tidak ada quick reminder — SLO terpenuhi, tidak ada error berulang.
+</div>
+{% endif %}

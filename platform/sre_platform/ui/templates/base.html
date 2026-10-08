@@ -1,36 +1,52 @@
 <!doctype html>
-<html lang="en">
+<html lang="id">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{{ settings.app_name }}{% endblock %}</title>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   <style>
-    :root { --bg:#f6f7f9; --card:#fff; --ink:#1a1f2b; --muted:#5b6472; --line:#e3e6ec;
-            --accent:#2563eb; --ok:#16a34a; --warn:#d97706; --crit:#dc2626; }
+    :root { --bg:#f4f6f9; --card:#fff; --ink:#1a1f2b; --muted:#5b6472; --line:#e3e6ec;
+            --accent:#2563eb; --accent-soft:#eff4ff; --ok:#16a34a; --warn:#d97706; --crit:#dc2626;
+            --shadow:0 1px 2px rgba(16,24,40,.05); }
     * { box-sizing: border-box; }
     body { margin:0; background:var(--bg); color:var(--ink);
-           font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-    header { background:#fff; border-bottom:1px solid var(--line); padding:12px 24px;
-             display:flex; align-items:center; gap:16px; }
-    header a { color:var(--ink); text-decoration:none; font-weight:600; }
-    main { max-width:1180px; margin:0 auto; padding:20px 24px 60px; }
-    .grid { display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); }
-    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
-    .card h3 { margin:0 0 6px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
-    .big { font-size:26px; font-weight:650; }
-    table { width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+           font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+    header { background:#fff; border-bottom:1px solid var(--line); padding:0 24px;
+             display:flex; align-items:center; gap:4px; height:52px; position:sticky; top:0; z-index:10; }
+    header .brand { font-weight:700; color:var(--accent); margin-right:14px; font-size:15px; text-decoration:none; }
+    header nav a { color:var(--muted); text-decoration:none; font-weight:550; padding:16px 12px;
+                   display:inline-block; border-bottom:2px solid transparent; }
+    header nav a:hover { color:var(--ink); }
+    header nav a.active { color:var(--accent); border-bottom-color:var(--accent); }
+    header .spacer { flex:1; }
+    header .env { font-size:12px; color:var(--muted); }
+    main { max-width:1240px; margin:0 auto; padding:22px 24px 70px; }
+    .page-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px; }
+    h2 { font-size:18px; margin:26px 0 10px; }
+    h2 .cap { font-size:13px; font-weight:400; color:var(--muted); margin-left:8px; }
+    .grid { display:grid; gap:14px; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); }
+    .grid .card > div:nth-child(2) { margin-top:2px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; box-shadow:var(--shadow); }
+    .card h3 { margin:0 0 6px; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+    .big { font-size:25px; font-weight:650; }
+    .card .muted { font-size:12.5px; }
+    table { width:100%; border-collapse:collapse; background:#fff; border:1px solid var(--line);
+            border-radius:12px; overflow:hidden; box-shadow:var(--shadow); }
     th,td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); }
-    th { background:#fafbfc; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+    th { background:#fafbfc; font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
     tr:last-child td { border-bottom:none; }
-    .pill { display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+    tbody tr:hover { background:#f8faff; }
+    .pill { display:inline-block; padding:2px 9px; border-radius:999px; font-size:11.5px; font-weight:600; }
     .healthy { background:#e8f7ee; color:var(--ok); }
     .degraded { background:#fdf3e3; color:var(--warn); }
     .down { background:#fdeaea; color:var(--crit); }
     .unknown { background:#eef0f4; color:var(--muted); }
+    .label-badge { background:var(--accent-soft); color:var(--accent); }
     .err { color:var(--crit); }
     .ok-text { color:var(--ok); }
     .warn-text { color:var(--warn); }
-    .action { display:flex; gap:10px; align-items:flex-start; padding:7px 0; border-bottom:1px solid var(--line); }
+    .action { display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--line); }
     .action:last-child { border-bottom:none; }
     .dot { width:9px; height:9px; border-radius:50%; margin-top:5px; flex:none; }
     .dot-crit { background:var(--crit); }
@@ -41,15 +57,43 @@
     .ask-turn { border-left:3px solid var(--accent); padding:6px 10px; margin:6px 0; background:#fafbff; }
     .ask-q { margin-bottom:2px; }
     .muted { color:var(--muted); }
-    h2 { font-size:17px; margin:26px 0 10px; }
+    button, .btn { background:var(--accent); border:none; color:#fff; padding:7px 14px; border-radius:8px;
+            font-size:13px; font-weight:600; cursor:pointer; }
+    button:hover { filter:brightness(1.07); }
+    .btn-ghost { background:transparent; color:var(--muted); border:1px solid var(--line); padding:4px 9px; }
+    .btn-ghost:hover { color:var(--ink); filter:none; }
+    input, select { border:1px solid var(--line); border-radius:8px; padding:7px 10px; font-size:13px;
+                    background:#fff; color:var(--ink); }
+    input:focus, select:focus { outline:2px solid var(--accent-soft); border-color:var(--accent); }
+    /* quick reminders */
+    .reminder { border-left:4px solid var(--warn); margin-bottom:10px; }
+    .reminder-critical { border-left-color:var(--crit); }
+    .reminder-ok { border-left-color:var(--ok); display:flex; gap:10px; align-items:center; color:var(--muted); }
+    .reminder-head { display:flex; gap:10px; align-items:flex-start; }
+    .reminder-rec { background:#f6f9ff; border:1px solid #e3ebff; border-radius:8px; padding:8px 12px;
+                    margin-top:8px; font-size:13px; }
+    .rec-label { font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; margin-bottom:2px; }
+    .rec-meta { font-size:11.5px; margin-top:6px; }
+    .reminder-obs { font-size:12.5px; font-family:ui-monospace,monospace; margin-top:2px;
+                    white-space:pre-wrap; word-break:break-word; }
+    /* perf test */
+    .perf-head { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+    .two-col { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    @media (max-width:900px){ .two-col { grid-template-columns:1fr; } }
+    .section-note { font-size:12.5px; color:var(--muted); margin:-4px 0 10px; }
+    code { background:#f1f3f7; border-radius:4px; padding:1px 5px; font-size:12px; }
   </style>
 </head>
 <body>
 <header>
-  <a href="{{ u('/') }}">SRE&nbsp;Platform</a>
-  <a href="{{ u('/discovery') }}" class="muted">Discovery</a>
-  <a href="{{ u('/topology') }}" class="muted">Topology</a>
-  <span class="muted">Agentic Application Reliability</span>
+  <a class="brand" href="{{ u('/') }}">◆ SRE Platform</a>
+  <nav>
+    <a href="{{ u('/') }}" class="{{ 'active' if nav == 'overview' }}">Overview</a>
+    <a href="{{ u('/discovery') }}" class="{{ 'active' if nav == 'discovery' }}">Applications</a>
+    <a href="{{ u('/topology') }}" class="{{ 'active' if nav == 'topology' }}">Topology</a>
+  </nav>
+  <span class="spacer"></span>
+  <span class="env">Agentic Application Reliability</span>
 </header>
 <main>{% block content %}{% endblock %}</main>
 </body>

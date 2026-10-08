@@ -1,0 +1,45 @@
+{# Polled fragment: perf test state + live metric cards during the window. #}
+<div class="perf-head">
+  {% if running_test %}
+    <span class="pill degraded">⏱ Test berjalan</span>
+    <span class="muted">{{ running_test.duration_s }}s — mulai {{ running_test.started_at.strftime('%H:%M:%S') }} UTC.
+      Metric dicatat pasif dari traffic asli; ringkasan muncul otomatis setelah selesai.</span>
+  {% else %}
+    <form hx-post="{{ u('/api/apps') }}/{{ app.slug }}/perf-test/ui"
+          hx-target="#perf-test-panel" hx-swap="innerHTML" style="display:flex;gap:8px;align-items:center">
+      <label class="muted">Durasi</label>
+      <select name="duration_s">
+        <option value="60">1 menit</option>
+        <option value="120" selected>2 menit</option>
+        <option value="300">5 menit</option>
+        <option value="600">10 menit</option>
+      </select>
+      <button type="submit">▶ Jalankan Performance Test</button>
+    </form>
+  {% endif %}
+</div>
+
+{% if running_test %}
+<div id="perf-live"
+     hx-get="{{ u('/applications') }}/{{ app.slug }}/metrics"
+     hx-trigger="every 10s" hx-swap="innerHTML">
+  {% include "_metrics_live.html" %}
+</div>
+{% endif %}
+
+{% if latest_test and latest_test.summary %}
+  {% set s = latest_test.summary %}
+  <div class="card" style="margin-top:12px">
+    <h3>Hasil test terakhir — {{ latest_test.duration_s }}s
+      ({{ latest_test.finished_at.strftime('%d %b %H:%M') if latest_test.finished_at else '—' }} UTC)</h3>
+    <div class="grid">
+      <div><div class="muted">Total requests</div><div class="big">{{ s.http_total if s.http_total is not none else '—' }}</div></div>
+      <div><div class="muted">Req/s (avg)</div><div class="big">{{ "%.2f"|format(s.req_rate.avg) if s.req_rate and s.req_rate.avg is not none else '—' }}</div></div>
+      <div><div class="muted">Error rate (avg)</div><div class="big {{ 'err' if s.err_rate and s.err_rate.avg and s.err_rate.avg > 0.05 else '' }}">{{ "%.1f%%"|format(s.err_rate.avg * 100) if s.err_rate and s.err_rate.avg is not none else '—' }}</div></div>
+      <div><div class="muted">P95</div><div class="big">{{ "%.0fms"|format(s.p95_ms.p95_of_p95_ms) if s.p95_ms and s.p95_ms.p95_of_p95_ms else '—' }}</div></div>
+      <div><div class="muted">Host CPU (max)</div><div class="big">{{ "%.0f%%"|format(s.cpu_pct.max) if s.cpu_pct and s.cpu_pct.max is not none else '—' }}</div></div>
+      <div><div class="muted">Host Mem (max)</div><div class="big">{{ "%.0f%%"|format(s.mem_pct.max) if s.mem_pct and s.mem_pct.max is not none else '—' }}</div></div>
+    </div>
+    <div class="muted">samples: {{ s.window.samples }} · pasif (traffic asli, tanpa load generator)</div>
+  </div>
+{% endif %}

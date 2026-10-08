@@ -1,8 +1,7 @@
-"""Lightweight SQLite migrations.
+"""M11 schema additions.
 
-`Base.metadata.create_all` never alters existing tables, so new columns on old
-tables (e.g. Deployment gained CI columns after first deploy) must be added via
-ALTER TABLE. Idempotent: checks PRAGMA table_info first.
+SQLite create_all never alters existing tables, so new columns land here via
+idempotent ALTER TABLE (same pattern as migrations.py).
 """
 from __future__ import annotations
 
@@ -15,11 +14,11 @@ log = logging.getLogger("sre-platform.migrations")
 
 # table -> {column: DDL type}
 ADDED_COLUMNS: dict[str, dict[str, str]] = {
-    "deployment": {
-        "pr_url": "VARCHAR(512)",
-        "ci_state": "VARCHAR(32)",
-        "ci_url": "VARCHAR(512)",
-        "regression_checked": "BOOLEAN DEFAULT 0",
+    "slo": {
+        "metric": "VARCHAR(32) DEFAULT ''",
+        "direction": "VARCHAR(16) DEFAULT 'max'",
+        "threshold": "FLOAT",
+        "comparison": "VARCHAR(4) DEFAULT ''",
     },
 }
 

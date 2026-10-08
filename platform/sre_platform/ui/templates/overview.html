@@ -1,17 +1,20 @@
 {% extends "base.html" %}
+{% block title %}Overview — SRE Platform{% endblock %}
 {% block content %}
-<h2>Fleet Overview</h2>
-<p class="muted">{{ servers|length }} server terpantau · {{ total }} application · agentic SRE platform</p>
+<div class="page-head">
+  <h2 style="margin:0">Fleet Overview</h2>
+  <span class="muted">{{ servers|length }} server · {{ total }} application</span>
+</div>
 
 <div class="grid">
-  <div class="card"><h3>Healthy</h3><div class="big ok-text">{{ counts.healthy }}</div></div>
-  <div class="card"><h3>Degraded</h3><div class="big warn-text">{{ counts.degraded }}</div></div>
-  <div class="card"><h3>Down</h3><div class="big err">{{ counts.down }}</div></div>
-  <div class="card"><h3>Unknown</h3><div class="big muted">{{ counts.unknown }}</div></div>
+  <div class="card"><h3>Healthy</h3><div class="big ok-text">{{ counts.healthy }}</div><div class="muted">semua check lulus</div></div>
+  <div class="card"><h3>Degraded</h3><div class="big warn-text">{{ counts.degraded }}</div><div class="muted">perlu dilihat</div></div>
+  <div class="card"><h3>Down</h3><div class="big err">{{ counts.down }}</div><div class="muted">tidak merespons</div></div>
+  <div class="card"><h3>Unknown</h3><div class="big muted">{{ counts.unknown }}</div><div class="muted">belum ada data</div></div>
   <div class="card"><h3>Perlu review</h3><div class="big">{{ unconfirmed_count }}</div><div class="muted">kandidat discovery</div></div>
 </div>
 
-<h2>Yang perlu kamu lakukan</h2>
+<h2>Yang perlu kamu lakukan <span class="cap">urut prioritas</span></h2>
 <div class="card">
 {% for a in actions %}
   <div class="action action-{{ a.level }}">
@@ -29,12 +32,13 @@
 {% if attention %}
 <h2>Attention Required</h2>
 <table>
-  <tr><th>Status</th><th>Application</th><th>Err rate</th><th>P95</th><th>Log err 1j</th><th>Findings</th><th>Incidents</th></tr>
+  <tr><th>Status</th><th>Application</th><th>Label</th><th>Err rate</th><th>P95</th><th>Log err 1j</th><th>Findings</th><th>Incidents</th></tr>
   {% for row in attention %}
   <tr>
     <td><span class="pill {{ row.app.status.value }}">{{ row.app.status.value }}</span></td>
     <td><a href="{{ u('/applications') }}/{{ row.app.slug }}">{{ row.app.name }}</a>
         <div class="muted">{{ row.app.environment }} · {{ row.app.deployment_model.value }}</div></td>
+    <td><span class="pill label-badge">{{ 'External' if row.app.discovery.value == 'manual' else 'Detected' }}</span></td>
     <td>{{ "%.1f%%"|format(row.err_rate * 100) if row.err_rate is not none else "—" }}</td>
     <td>{{ "%.0fms"|format(row.p95) if row.p95 is not none else "—" }}</td>
     <td>{{ row.log_errors_60m }}</td>
@@ -45,20 +49,20 @@
 </table>
 {% endif %}
 
-<h2>Applications</h2>
+<h2>Applications <span class="cap">Detected = otomatis dari agent · External = ditambah manual</span></h2>
 {% if app_rows %}
 <table>
-  <tr><th>Status</th><th>Application</th><th>Env</th><th>Model</th><th>Req/s</th><th>Err rate</th><th>P95</th><th>Findings</th><th>Incidents</th></tr>
+  <tr><th>Status</th><th>Application</th><th>Label</th><th>Env</th><th>Req/s</th><th>Err rate</th><th>P95</th><th>Findings</th><th>Incidents</th></tr>
   {% for row in app_rows %}
   <tr>
     <td><span class="pill {{ row.app.status.value }}">{{ row.app.status.value }}</span></td>
     <td>
       {% if row.app.confirmed %}<a href="{{ u('/applications') }}/{{ row.app.slug }}">{{ row.app.name }}</a>
       {% else %}<a href="{{ u('/discovery') }}">{{ row.app.name }}</a> <span class="pill unknown">unconfirmed</span>{% endif %}
-      <div class="muted">{{ row.app.server.hostname if row.app.server else "external" }}</div>
+      <div class="muted">{{ row.app.server.hostname if row.app.server else "diprobe dari platform" }}</div>
     </td>
+    <td><span class="pill label-badge">{{ 'External' if row.app.discovery.value == 'manual' else 'Detected' }}</span></td>
     <td class="muted">{{ row.app.environment }}</td>
-    <td class="muted">{{ row.app.deployment_model.value }}</td>
     <td>{{ "%.2f"|format(row.req_rate) if row.req_rate is not none else "—" }}</td>
     <td class="{{ 'err' if row.err_rate and row.err_rate > 0.05 else 'muted' }}">{{ "%.1f%%"|format(row.err_rate * 100) if row.err_rate is not none else "—" }}</td>
     <td>{{ "%.0fms"|format(row.p95) if row.p95 is not none else "—" }}</td>
@@ -72,13 +76,13 @@
   <p><strong>Belum ada application terdaftar.</strong></p>
   <p class="muted">Cara mulai:</p>
   <ol>
-    <li>Install <code>sre-agent</code> di VM yang mau dipantau → app terdeteksi otomatis (lihat <code>docs/runbook-agent-install.md</code>), atau</li>
-    <li>Register manual via API: <code>POST /api/apps</code></li>
+    <li>Install <code>sre-agent</code> di VM target → app terdeteksi otomatis (Detected Apps), atau</li>
+    <li>Tambah manual via form <a href="{{ u('/discovery') }}">External Resource</a> (domain + repo).</li>
   </ol>
 </div>
 {% endif %}
 
-<h2>Aktivitas terbaru</h2>
+<h2>Aktivitas terbaru <span class="cap">live</span></h2>
 <div id="live-activity"
      hx-get="{{ u('/activity') }}"
      hx-trigger="every {{ settings.ui_refresh_s }}s"

@@ -89,15 +89,20 @@ def test_file_batch(tmp_path):
 
 def test_store_log_batches_matches_app(db):
     app_row = _app(db)
+    from datetime import UTC, datetime, timedelta
+
     from sre_platform.models import Workload
 
     db.add(Workload(application_id=app_row.id, name="app4", external_id="app4.service"))
     db.commit()
+    now = datetime.now(UTC)
     stored = store_log_batches(
         db,
         db.query(Server).first(),
         [{"source": "journald", "workload_ref": "app4.service", "level_counts": {"ERROR": 4, "INFO": 10},
-          "sample_lines": ["ERROR boom"], "ts_start": "2026-10-07 12:00:00", "ts_end": "2026-10-07 12:05:00"}],
+          "sample_lines": ["ERROR boom"],
+          "ts_start": (now - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S"),
+          "ts_end": (now - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S")}],
     )
     db.commit()
     assert stored == 1

@@ -196,4 +196,4 @@ def test_ui_discovery_page_lists_candidates(client, db):
     resp = client.get("/discovery")
     assert resp.status_code == 200
     assert "hermes-gateway" in resp.text
-    assert "Unconfirmed candidates" in resp.text
+    assert "Kandidat deteksi otomatis" in resp.text

@@ -404,6 +404,21 @@ def slo_summary_for_app(db: Session, app_id: int) -> list[dict]:
     rows = db.scalars(select(SLO).where(SLO.application_id == app_id, SLO.enabled == True)).all()  # noqa: E712
     out = []
     for slo_row in rows:
+        if slo_row.metric:
+            # metric-threshold SLO: state comes from quickreminders checks
+            out.append(
+                {
+                    "sli": slo_row.sli,
+                    "target": slo_row.threshold,
+                    "threshold_display": f"{slo_row.comparison} {slo_row.threshold:g}",
+                    "current_pct": None,
+                    "burned_s": None,
+                    "budget_total_s": None,
+                    "exhausted": None,
+                    "window_days": slo_row.window_days,
+                }
+            )
+            continue
         state = compute_slo_status(db, slo_row)
         if state is None:
             continue
@@ -411,6 +426,7 @@ def slo_summary_for_app(db: Session, app_id: int) -> list[dict]:
             {
                 "sli": slo_row.sli,
                 "target": slo_row.target,
+                "threshold_display": None,
                 "current_pct": state.current_pct,
                 "burned_s": state.burned_s,
                 "budget_total_s": state.total_s,

@@ -1,13 +1,38 @@
 {% extends "base.html" %}
-{% block title %}Discovery — SRE Platform{% endblock %}
+{% block title %}Applications — SRE Platform{% endblock %}
 {% block content %}
-<h2>Discovery</h2>
-<p class="muted">Auto-discovered candidates are unconfirmed and never alert until an operator reviews them.</p>
+<div class="page-head">
+  <h2 style="margin:0">Applications</h2>
+  <span class="muted">label = asal app: otomatis (Detected) atau manual (External Resource)</span>
+</div>
 
-<h3 style="font-size:14px">Unconfirmed candidates ({{ candidates|length }})</h3>
+<h2 style="margin-top:18px">Tambah External Resource
+  <span class="cap">app di luar server ini — diprobe langsung dari platform</span>
+</h2>
+<div class="card">
+  <form hx-post="{{ u('/api/ui/apps/external') }}" hx-target="#external-result" hx-swap="innerHTML"
+        style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+    <div><div class="muted" style="font-size:12px">Nama app *</div>
+      <input name="name" placeholder="Billing API" required style="width:170px"></div>
+    <div><div class="muted" style="font-size:12px">Domain *</div>
+      <input name="domain" placeholder="app.example.com" required style="width:190px"></div>
+    <div><div class="muted" style="font-size:12px">Git repository</div>
+      <input name="repository_url" placeholder="https://github.com/user/repo" style="width:230px"></div>
+    <div><div class="muted" style="font-size:12px">Health URL</div>
+      <input name="health_check_url" placeholder="(default https://domain)" style="width:200px"></div>
+    <div><div class="muted" style="font-size:12px">Owner</div>
+      <input name="owner" placeholder="tim" style="width:110px"></div>
+    <button type="submit">+ Tambah</button>
+  </form>
+  <div id="external-result" style="margin-top:8px"></div>
+</div>
+
+<h2>Kandidat deteksi otomatis ({{ candidates|length }})
+  <span class="cap">belum dikonfirmasi — tidak akan alert sebelum direview</span>
+</h2>
 {% if candidates %}
 <table>
-  <tr><th>Name</th><th>Server</th><th>Model</th><th>Workloads</th><th>Ports</th><th>Confirm</th></tr>
+  <tr><th>Nama</th><th>Server</th><th>Model</th><th>Workloads</th><th>Ports</th><th>Konfirmasi</th></tr>
   {% for a in candidates %}
   <tr>
     <td>{{ a.name }}<div class="muted">{{ a.slug }}</div></td>
@@ -20,29 +45,30 @@
       {% for w in a.workloads %}{% for i in w.instances %}{{ i.listen_port or "" }}{% endfor %}{% endfor %}
     </td>
     <td>
-      <form method="post" action="{{ u('/discovery') }}/{{ a.slug }}/confirm" style="display:flex;gap:6px">
-        <input name="name" value="{{ a.name }}" style="width:150px">
-        <input name="environment" value="{{ a.environment }}" style="width:70px">
-        <input name="owner" placeholder="owner" style="width:90px">
-        <input name="health_check_url" placeholder="health url (opt)" style="width:180px">
+      <form method="post" action="{{ u('/discovery') }}/{{ a.slug }}/confirm" style="display:flex;gap:6px;flex-wrap:wrap">
+        <input name="name" value="{{ a.name }}" style="width:140px">
+        <input name="environment" value="{{ a.environment }}" style="width:64px">
+        <input name="owner" placeholder="owner" style="width:84px">
+        <input name="health_check_url" placeholder="health url (opt)" style="width:150px">
         <button type="submit">Confirm</button>
       </form>
     </td>
   </tr>
   {% endfor %}
 </table>
-{% else %}<p class="muted">No unconfirmed candidates.</p>{% endif %}
+{% else %}<p class="muted">Tidak ada kandidat baru.</p>{% endif %}
 
-<h3 style="font-size:14px">Registered applications ({{ apps|length }})</h3>
+<h2>Terdaftar ({{ apps|length }})</h2>
 <table>
-  <tr><th>Status</th><th>Name</th><th>Env</th><th>Model</th><th>Discovery</th></tr>
+  <tr><th>Status</th><th>Nama</th><th>Label</th><th>Env</th><th>Model</th><th>Asal</th></tr>
   {% for a in apps %}
   <tr>
     <td><span class="pill {{ a.status.value }}">{{ a.status.value }}</span></td>
     <td><a href="{{ u('/applications') }}/{{ a.slug }}">{{ a.name }}</a></td>
+    <td><span class="pill label-badge">{{ 'External Resource' if a.discovery.value == 'manual' else 'Detected App' }}</span></td>
     <td class="muted">{{ a.environment }}</td>
     <td class="muted">{{ a.deployment_model.value }}</td>
-    <td class="muted">{{ a.discovery.value }}</td>
+    <td class="muted">{{ a.server.hostname if a.server else 'platform probe' }}</td>
   </tr>
   {% endfor %}
 </table>

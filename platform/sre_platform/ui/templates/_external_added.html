@@ -1,0 +1,5 @@
+{# Fragment setelah external resource ditambahkan. #}
+<span class="ok-text">✓ {{ app.name }} terdaftar sebagai External Resource.
+  <a href="{{ u('/applications') }}/{{ app.slug }}">Buka halaman app →</a>
+  (halaman akan refresh otomatis)</span>
+<script>setTimeout(function(){ window.location.reload(); }, 1200);</script>

@@ -476,6 +476,12 @@ class SLO(Base, TimestampMixin):
     target_ms: Mapped[float | None] = mapped_column(Float)  # for latency_p95
     window_days: Mapped[int] = mapped_column(Integer, default=30)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # M11 advanced SLI: metric-backed SLO with a simple threshold.
+    # metric: error_rate (0-1) / req_rate / latency_p95_ms / cpu_pct / mem_pct
+    # comparison: "<" or ">"  (breach when metric < or > threshold)
+    metric: Mapped[str | None] = mapped_column(String(32))
+    comparison: Mapped[str | None] = mapped_column(String(4))
+    threshold: Mapped[float | None] = mapped_column(Float)
 
 
 class ErrorBudgetState(Base, TimestampMixin):
@@ -515,6 +521,36 @@ class Postmortem(Base, TimestampMixin):
     generated_by: Mapped[str | None] = mapped_column(String(64))
     reviewed_by: Mapped[str | None] = mapped_column(String(128))
     published: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class PerfTest(Base):
+    """M11: one-time passive performance observation window (max 10 minutes).
+
+    While status='running' the UI live-polls metrics for this app; on finish a
+    summary (RED aggregates + host peaks) is written by the sweeper.
+    """
+
+    __tablename__ = "perf_test"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("application.id"), index=True)
+    duration_s: Mapped[int] = mapped_column(Integer, default=120)
+    status: Mapped[str] = mapped_column(String(16), default="running")  # running/done
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    summary: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class AppReport(Base, TimestampMixin):
+    """M11: quick on-demand application report (AI narrative + computed facts)."""
+
+    __tablename__ = "app_report"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("application.id"), index=True)
+    window_minutes: Mapped[int] = mapped_column(Integer, default=120)
+    doc: Mapped[dict] = mapped_column(JSON, default=dict)
+    generated_by: Mapped[str | None] = mapped_column(String(64))
 
 
 class User(Base, TimestampMixin):

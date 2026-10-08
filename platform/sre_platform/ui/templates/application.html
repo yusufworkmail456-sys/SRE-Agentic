@@ -1,221 +1,243 @@
 {% extends "base.html" %}
 {% block title %}{{ app.name }} — SRE Platform{% endblock %}
 {% block content %}
-<h2>{{ app.name }} <span class="pill {{ app.status.value }}">{{ app.status.value }}</span></h2>
+<div class="page-head">
+  <h2 style="margin:0">{{ app.name }}</h2>
+  <span class="pill {{ app.status.value }}">{{ app.status.value }}</span>
+  {% if app.discovery.value == 'manual' %}
+    <span class="pill label-badge" title="Ditambahkan manual: domain + repo">External Resource</span>
+  {% else %}
+    <span class="pill label-badge" title="Terdeteksi otomatis oleh sre-agent di server">Detected App</span>
+  {% endif %}
+  {% if not app.confirmed %}<span class="pill unknown">unconfirmed</span>{% endif %}
+</div>
 <p class="muted">
   {{ app.environment }} · {{ app.deployment_model.value }} · owner {{ app.owner or "—" }} ·
-  discovery {{ app.discovery.value }}{% if not app.confirmed %} · <strong>unconfirmed</strong>{% endif %}
+  {% if app.server %}server {{ app.server.hostname }}{% else %}tanpa agent (diprobe dari platform){% endif %}
 </p>
 
-<div class="grid">
-  <div class="card"><h3>Server</h3><div>{{ app.server.hostname if app.server else "—" }}</div></div>
-  <div class="card"><h3>Workloads</h3><div class="big">{{ app.workloads|length }}</div></div>
-  <div class="card"><h3>Endpoints</h3><div class="big">{{ app.endpoints|length }}</div></div>
-  <div class="card"><h3>Dependencies</h3><div class="big">{{ app.dependencies|length }}</div></div>
+<h2>Quick Reminder
+  <span class="cap">SLO breach &amp; error berulang — dengan rekomendasi AI Agent</span>
+</h2>
+<div id="reminders-panel"
+     hx-get="{{ u('/applications') }}/{{ app.slug }}/reminders"
+     hx-trigger="every {{ settings.ui_refresh_s }}s" hx-swap="innerHTML">
+  {% include "_reminders_live.html" %}
 </div>
 
-{% if app.endpoints %}
-<h2>Network</h2>
-<div class="grid">
-  {% for e in app.endpoints %}
-  <div class="card">
-    <h3>{{ e.domain or e.url }}</h3>
-    <div class="big">
-      {% if e.tls_expires_at %}
-        {% set days = ((e.tls_expires_at - now_utc()).days) %}
-        {% if days > 21 %}<span class="ok-text">SSL ok</span>
-        {% elif days > 7 %}<span class="warn-text">SSL {{ days }}d</span>
-        {% else %}<span class="err">SSL {{ days }}d</span>{% endif %}
-      {% else %}<span class="muted">no TLS info</span>{% endif %}
-    </div>
-    <div class="muted">{{ e.url }}{% if e.tls_expires_at %} · exp {{ e.tls_expires_at.strftime("%Y-%m-%d") }}{% endif %}</div>
-  </div>
-  {% endfor %}
+<h2>Performance <span class="cap">one-time test (60s–10m, pasif) — bukan monitoring realtime</span></h2>
+<div id="perf-test-panel"
+     hx-get="{{ u('/applications') }}/{{ app.slug }}/perf-test"
+     hx-trigger="every 10s" hx-swap="innerHTML">
+  {% include "_perf_test.html" %}
 </div>
-{% endif %}
 
-<h2>Health &amp; RED metrics</h2>
+<h2>Health <span class="cap">kondisi terkini (update tiap {{ settings.ui_refresh_s }}s)</span></h2>
 <div id="live-metrics"
      hx-get="{{ u('/applications') }}/{{ app.slug }}/metrics"
-     hx-trigger="every {{ settings.ui_refresh_s }}s"
-     hx-swap="innerHTML">
+     hx-trigger="every {{ settings.ui_refresh_s }}s" hx-swap="innerHTML">
   {% include "_metrics_live.html" %}
 </div>
 
-<h2>Reliability (SLO)</h2>
-<div class="grid">
-  {% for s in slos %}
-  <div class="card">
-    <h3>{{ s.sli }}</h3>
-    <div class="big {{ 'err' if s.exhausted else '' }}">{{ "%.2f%%"|format(s.current_pct) if s.current_pct is not none else "—" }}</div>
-    <div class="muted">target {{ "%.3f"|format(s.target) }} · {{ "budget exhausted" if s.exhausted else "budget ok" }} · {{ s.window_days }}d window</div>
-  </div>
-  {% endfor %}
-  {% if not slos %}<p class="muted">No SLOs configured. POST /api/apps/{{ app.slug }}/slos to add one.</p>{% endif %}
-</div>
-{% if budget_note %}<p class="muted">{{ budget_note }}</p>{% endif %}
-
-<h2>Ask Agent</h2>
-<div class="card" id="ask-box">
-  <div id="ask-log">
-    {% if not settings.llm_enabled %}<p class="muted">LLM disabled — answers will be facts-only until SRE_LLM_* is configured.</p>{% endif %}
-  </div>
-  <form hx-post="{{ u('/api/ask') }}/{{ app.slug }}/html" hx-target="#ask-log" hx-swap="beforeend" style="display:flex;gap:8px;margin-top:8px">
-    <input name="question" placeholder="Why is this app slow? What changed recently?" style="flex:1">
-    <button type="submit">Ask</button>
-  </form>
-</div>
-
-<h2>Logs (recent batches)</h2>
-{% if logs %}
-<table>
-  <tr><th>Window</th><th>Source</th><th>Levels</th><th>Samples</th></tr>
-  {% for b in logs %}
-  <tr>
-    <td class="muted">{{ b.ts_start.strftime("%H:%M") if b.ts_start else "—" }} → {{ b.ts_end.strftime("%H:%M") if b.ts_end else "—" }}</td>
-    <td class="muted">{{ b.source or "—" }}{% if b.workload_id %}<div>wl#{{ b.workload_id }}</div>{% endif %}</td>
-    <td>
-      {% for lvl, cnt in (b.level_counts or {}).items() %}
-        <span class="pill {{ 'down' if lvl in ('ERROR','CRITICAL') else 'unknown' }}">{{ lvl }} {{ cnt }}</span>
-      {% endfor %}
-    </td>
-    <td class="muted">
-      {% for line in (b.sample_lines or [])[:2] %}<div style="font-family:monospace;font-size:11px">{{ line[:140] }}</div>{% endfor %}
-    </td>
-  </tr>
-  {% endfor %}
-</table>
-<p class="muted">Last 60 min totals: {{ log_counts.get("ERROR", 0) + log_counts.get("CRITICAL", 0) }} error lines</p>
-{% else %}<p class="muted">No log batches yet.</p>{% endif %}
-
-<h2>Repository</h2>
+<h2>Quick Application Report
+  <span class="cap">snapshot performa + findings + SLO saat ini, oleh AI Agent</span>
+</h2>
 <div class="card">
-  {% if repo_info.linked %}
-    <p><strong>{{ repo_info.url }}</strong> <span class="muted">({{ repo_info.branch }})</span>
-       {% if repo_info.token_configured %}<span class="pill healthy">own token</span>{% else %}<span class="pill unknown">server credential</span>{% endif %}</p>
-    {% if repo_info.recent_commits %}
-    <table style="margin-top:8px">
-      <tr><th>SHA</th><th>Author</th><th>Message</th><th>Date</th></tr>
-      {% for c in repo_info.recent_commits %}
-      <tr><td class="muted"><code>{{ c.sha }}</code></td><td>{{ c.author or "—" }}</td>
-          <td>{{ c.message }}</td><td class="muted">{{ c.date[:16] if c.date else "—" }}</td></tr>
-      {% endfor %}
-    </table>
-    {% else %}<p class="muted">Belum ada commit ter-index — klik Sync.</p>{% endif %}
-    <button hx-post="{{ u('/repo') }}/{{ app.slug }}/sync" hx-target="#repo-sync-msg" style="margin-top:8px">Sync now</button>
-    <span id="repo-sync-msg" class="muted"></span>
-  {% else %}
-    <p class="muted">Belum ada repository terhubung.</p>
-    <form hx-post="{{ u('/repo') }}/{{ app.slug }}/link" hx-target="#repo-sync-msg" style="display:flex;gap:8px;margin-top:6px">
-      <input name="url" placeholder="https://github.com/user/repo" style="flex:1">
-      <input name="branch" value="main" style="width:90px">
-      <button type="submit">Link repo</button>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <form hx-post="{{ u('/api/apps') }}/{{ app.slug }}/report/ui" hx-target="#report-msg" hx-swap="innerHTML"
+          hx-indicator="#report-spin">
+      <input type="hidden" name="window_minutes" value="120">
+      <button type="submit">📄 Generate Report</button>
     </form>
+    <span id="report-spin" class="muted" style="display:none">men-generate…</span>
+    <span id="report-msg" class="muted">
+      {% if report %}Laporan terakhir: {{ report.created_at.strftime('%d %b %H:%M') if report.created_at else '—' }} UTC
+      · {{ report.generated_by }}{% else %}Belum ada report.{% endif %}
+    </span>
+    {% if report %}<a href="{{ u('/api/apps') }}/{{ app.slug }}/report/latest/export.md">export .md</a>{% endif %}
+  </div>
+  {% if report and report.doc %}
+    {% set doc = report.doc %}
+    {% if doc.narrative and doc.narrative.summary %}
+    <p style="margin:12px 0 4px"><strong>Ringkasan:</strong> {{ doc.narrative.summary }}</p>
+    {% endif %}
+    <div class="grid" style="margin-top:10px">
+      <div class="card"><h3>Requests ({{ doc.window_minutes }}m)</h3><div class="big">{{ doc.performance.http_total if doc.performance.http_total is not none else '—' }}</div></div>
+      <div class="card"><h3>Err rate avg</h3><div class="big {{ 'err' if doc.performance.err_rate_avg and doc.performance.err_rate_avg > 0.05 else '' }}">{{ "%.1f%%"|format(doc.performance.err_rate_avg * 100) if doc.performance.err_rate_avg is not none else '—' }}</div></div>
+      <div class="card"><h3>P95 avg</h3><div class="big">{{ "%.0fms"|format(doc.performance.p95_avg_ms) if doc.performance.p95_avg_ms is not none else '—' }}</div></div>
+      <div class="card"><h3>Log errors 24h</h3><div class="big">{{ doc.log_errors_24h }}</div></div>
+    </div>
+    {% if doc.slo_report %}
+    <div class="muted" style="margin-top:8px">SLO: {% for s in doc.slo_report %}{{ s.sli }} {{ "%.2f%%"|format(s.current_pct) if s.current_pct is not none else '—' }} ({{ 'breach' if s.exhausted else 'ok' }}){{ " · " if not loop.last }}{% endfor %}</div>
+    {% endif %}
   {% endif %}
 </div>
 
-<h2>Findings</h2>
-{% if findings %}
-<table>
-  <tr><th>Sev</th><th>Title</th><th>Confidence</th><th>Status</th><th>Observation</th><th>Last seen</th></tr>
-  {% for f in findings %}
-  <tr>
-    <td><span class="pill {{ 'down' if f.severity.value=='critical' else ('degraded' if f.severity.value=='warning' else 'unknown') }}">{{ f.severity.value }}</span></td>
-    <td>{{ f.title }}<div class="muted">{{ f.rule_key or "" }}</div></td>
-    <td class="muted">{{ f.confidence.value }}</td>
-    <td class="muted">{{ f.status.value }}</td>
-    <td class="muted">{{ f.observation[:160] }}</td>
-    <td class="muted">{{ f.last_seen.strftime("%H:%M") }}</td>
-  </tr>
-  {% endfor %}
-</table>
-{% else %}<p class="muted">No findings.</p>{% endif %}
+<div class="two-col" style="margin-top:26px">
+  <div>
+    <h2 style="margin-top:0">Reliability (SLO)
+      <span class="cap">threshold custom → quick reminder saat breach</span>
+    </h2>
+    <div class="card">
+      {% if slos %}
+      <table>
+        <tr><th>SLI</th><th>Target</th><th>Sekarang</th><th>Status</th></tr>
+        {% for s in slos %}
+        <tr>
+          <td>{{ s.sli }}</td>
+          <td class="muted">{{ s.threshold_display if s.threshold_display else "%.3f"|format(s.target) }}</td>
+          <td>{{ "%.2f%%"|format(s.current_pct) if s.current_pct is not none else "—" }}</td>
+          <td><span class="pill {{ 'down' if s.exhausted else 'healthy' }}">{{ 'breach' if s.exhausted else 'ok' }}</span></td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% else %}<p class="muted">Belum ada SLO.</p>{% endif %}
+      <details style="margin-top:10px">
+        <summary class="muted" style="cursor:pointer">+ Tambah SLO threshold</summary>
+        <form hx-post="{{ u('/api/apps') }}/{{ app.slug }}/slos/threshold/ui" hx-target="#slo-msg" hx-swap="innerHTML"
+              style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <select name="sli">
+            <option value="error_rate">Error rate</option>
+            <option value="latency_p95_ms">P95 latency (ms)</option>
+            <option value="req_rate">Request rate</option>
+            <option value="cpu_pct">CPU %</option>
+            <option value="mem_pct">Memory %</option>
+          </select>
+          <select name="comparison">
+            <option value=">">di atas (&gt;)</option>
+            <option value="<">di bawah (&lt;)</option>
+          </select>
+          <input name="threshold" placeholder="threshold" style="width:100px" required>
+          <button type="submit">Simpan</button>
+        </form>
+        <div id="slo-msg" class="muted" style="margin-top:6px">contoh: error_rate &gt; 0.05, latency_p95_ms &gt; 800</div>
+      </details>
+      {% if budget_note %}<p class="muted" style="margin-bottom:0">{{ budget_note }}</p>{% endif %}
+    </div>
 
-<h2>Incidents</h2>
-{% if incidents %}
-<table>
-  <tr><th>Status</th><th>Title</th><th>Probable cause</th><th>Detected</th><th>MTTR</th></tr>
-  {% for i in incidents %}
-  <tr>
-    <td class="muted">{{ i.status.value }}</td>
-    <td>{{ i.title }}</td>
-    <td class="muted">{{ (i.probable_root_cause or "")[:120] }}<div class="muted">confidence: {{ i.confidence.value if i.confidence else "—" }}</div></td>
-    <td class="muted">{{ i.detected_at.strftime("%m-%d %H:%M") }}</td>
-    <td class="muted">{{ (i.mttr_s ~ "s") if i.mttr_s else "—" }}</td>
-  </tr>
-  {% endfor %}
-</table>
-{% else %}<p class="muted">No incidents.</p>{% endif %}
+    <h2>Ask Agent</h2>
+    <div class="card" id="ask-box">
+      <div id="ask-log">
+        {% if not settings.llm_enabled %}<p class="muted">LLM disabled — jawaban facts-only sampai SRE_LLM_* diisi.</p>{% endif %}
+      </div>
+      <form hx-post="{{ u('/api/ask') }}/{{ app.slug }}/html" hx-target="#ask-log" hx-swap="beforeend" style="display:flex;gap:8px;margin-top:8px">
+        <input name="question" placeholder="Kenapa app ini lambat? Apa yang berubah?" style="flex:1">
+        <button type="submit">Ask</button>
+      </form>
+    </div>
 
-<h2>Postmortems</h2>
-{% if postmortems %}
-<table>
-  <tr><th>Title</th><th>Generated by</th><th>Reviewed</th><th>Published</th><th>Export</th></tr>
-  {% for p in postmortems %}
-  <tr>
-    <td>{{ p.title }}</td>
-    <td class="muted">{{ p.generated_by }}</td>
-    <td class="muted">{{ p.reviewed_by or "—" }}</td>
-    <td class="muted">{{ "yes" if p.published else "draft" }}</td>
-    <td><a href="{{ u('/api/postmortems') }}/{{ p.id }}/export.md">md</a></td>
-  </tr>
-  {% endfor %}
-</table>
-{% else %}<p class="muted">No postmortems yet — generated automatically when an incident resolves.</p>{% endif %}
+    <h2>Findings <span class="cap">temuan rules + AI (bukan quick reminder)</span></h2>
+    {% if findings %}
+    <table>
+      <tr><th>Sev</th><th>Judul</th><th>Status</th><th>Terakhir</th></tr>
+      {% for f in findings %}
+      <tr>
+        <td><span class="pill {{ 'down' if f.severity.value=='critical' else ('degraded' if f.severity.value=='warning' else 'unknown') }}">{{ f.severity.value }}</span></td>
+        <td>{{ f.title }}<div class="muted">{{ (f.observation or '')[:110] }}</div></td>
+        <td class="muted">{{ f.status.value }}</td>
+        <td class="muted">{{ f.last_seen.strftime("%H:%M") }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<div class="card"><p class="muted" style="margin:0">Tidak ada findings.</p></div>{% endif %}
 
-<h2>Deployments</h2>
-{% if deployments %}
-<table>
-  <tr><th>SHA</th><th>Branch</th><th>Method</th><th>CI</th><th>Regression</th><th>When</th><th>Actions</th></tr>
-  {% for d in deployments %}
-  <tr>
-    <td class="muted"><code>{{ (d.sha or "—")[:8] }}</code></td>
-    <td class="muted">{{ d.branch or "—" }}</td>
-    <td class="muted">{{ d.method or "—" }}</td>
-    <td>
-      {% if d.ci_state %}<span class="pill {{ 'healthy' if d.ci_state=='success' else ('down' if d.ci_state=='failure' else 'unknown') }}">{{ d.ci_state }}</span>
-      {% else %}<span class="muted">—</span>{% endif %}
-    </td>
-    <td>
-      {% if d.regression %}<span class="pill down">REGRESSION</span>
-      {% elif d.regression_checked %}<span class="pill healthy">ok</span>
-      {% else %}<span class="muted">unchecked</span>{% endif %}
-    </td>
-    <td class="muted">{{ d.deployed_at.strftime("%m-%d %H:%M") }}</td>
-    <td>
-      <button hx-post="{{ u('/api/deployments') }}/{{ d.id }}/regression-check" hx-swap="none">verify</button>
-      {% if not d.rollback_of_id %}
-      <button hx-post="{{ u('/api/deployments') }}/{{ d.id }}/rollback" hx-confirm="Rollback deployment {{ (d.sha or '')[:8] }}? Approval + agent execution required." hx-swap="none">rollback</button>
+    <h2>Logs <span class="cap">realtime (batch tiap siklus agent)</span></h2>
+    <div id="logs-panel"
+         hx-get="{{ u('/applications') }}/{{ app.slug }}/logs"
+         hx-trigger="every {{ settings.ui_refresh_s }}s" hx-swap="innerHTML">
+      {% include "_logs_live.html" %}
+    </div>
+  </div>
+
+  <div>
+    <h2 style="margin-top:0">Detail</h2>
+    <div class="card">
+      <table style="border:none;box-shadow:none">
+        <tr><td class="muted">Server</td><td>{{ app.server.hostname if app.server else "—" }}</td></tr>
+        <tr><td class="muted">Workloads</td><td>{{ app.workloads|length }}</td></tr>
+        <tr><td class="muted">Endpoints</td><td>
+          {% if app.endpoints %}{% for e in app.endpoints %}{{ e.domain or e.url }}{{ " · " if not loop.last }}{% endfor %}
+          {% else %}—{% endif %}</td></tr>
+        <tr><td class="muted">Dependencies</td><td>{{ app.dependencies|length }}</td></tr>
+        <tr><td class="muted">Repo</td><td>
+          {% if repo_info.linked %}<a href="{{ repo_info.url }}">{{ repo_info.url.split('/')[-1] }}</a> <span class="muted">({{ repo_info.branch }})</span>
+          {% else %}—{% endif %}</td></tr>
+        <tr><td class="muted">DORA 30d</td><td>
+          {% if dora %}{{ dora.deployments }} deploys · CFR {{ "%.0f%%"|format(dora.change_failure_rate * 100) if dora.change_failure_rate is not none else '—' }}{% else %}—{% endif %}</td></tr>
+      </table>
+      {% if repo_info.linked %}
+      <form hx-post="{{ u('/repo') }}/{{ app.slug }}/sync" hx-target="#repo-sync-msg" style="margin-top:8px">
+        <button type="submit" class="btn-ghost">Sync repo</button>
+      </form>
+      <span id="repo-sync-msg" class="muted"></span>
+      {% elif app.discovery.value == 'manual' %}
+      <form hx-post="{{ u('/repo') }}/{{ app.slug }}/link" hx-target="#repo-sync-msg" style="display:flex;gap:8px;margin-top:8px">
+        <input name="url" placeholder="https://github.com/user/repo" style="flex:1">
+        <button type="submit" class="btn-ghost">Link repo</button>
+      </form>
       {% endif %}
-    </td>
-  </tr>
-  {% endfor %}
-</table>
-<p class="muted">Rollback/verify: verify runs instantly; rollback stages a high-risk action (approval + agent allowlist required).</p>
-{% else %}<p class="muted">No deployments recorded — POST /api/apps/{{ app.slug }}/deployments or auto-detected.</p>{% endif %}
+    </div>
 
-<h2>DORA metrics (30d)</h2>
-{% if dora %}
-<div class="grid">
-  <div class="card"><h3>Deploy freq</h3><div class="big">{{ dora.deployment_frequency_per_day }}/d</div><div class="muted">{{ dora.deployments }} deploys</div></div>
-  <div class="card"><h3>Change failure rate</h3><div class="big {{ 'err' if dora.change_failure_rate and dora.change_failure_rate > 0.2 else '' }}">{{ "%.0f%%"|format(dora.change_failure_rate * 100) if dora.change_failure_rate is not none else "—" }}</div><div class="muted">{{ dora.failed_deployments }} failed</div></div>
-  <div class="card"><h3>Lead time</h3><div class="big">{{ dora.lead_time_median_min ~ "m" if dora.lead_time_median_min is not none else "—" }}</div><div class="muted">median commit → deploy</div></div>
-  <div class="card"><h3>MTTR</h3><div class="big">{{ "%.0fs"|format(dora.mttr_avg_s) if dora.mttr_avg_s is not none else "—" }}</div><div class="muted">{{ dora.incidents_resolved }} incidents resolved</div></div>
+    <h2>Incidents <span class="cap">10 terakhir</span></h2>
+    {% if incidents %}
+    <table>
+      <tr><th>Status</th><th>Judul</th><th>Terdeteksi</th></tr>
+      {% for i in incidents %}
+      <tr>
+        <td class="muted">{{ i.status.value }}</td>
+        <td>{{ i.title }}<div class="muted">{{ (i.probable_root_cause or "")[:90] }}</div></td>
+        <td class="muted">{{ i.detected_at.strftime("%m-%d %H:%M") }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<div class="card"><p class="muted" style="margin:0">Tidak ada incidents.</p></div>{% endif %}
+
+    <h2>Deployments <span class="cap">10 terakhir</span></h2>
+    {% if deployments %}
+    <table>
+      <tr><th>SHA</th><th>CI</th><th>Waktu</th><th></th></tr>
+      {% for d in deployments %}
+      <tr>
+        <td class="muted"><code>{{ (d.sha or "—")[:8] }}</code><div class="muted">{{ (d.message or "")[:60] }}</div></td>
+        <td>{% if d.ci_state %}<span class="pill {{ 'healthy' if d.ci_state=='success' else ('down' if d.ci_state=='failure' else 'unknown') }}">{{ d.ci_state }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="muted">{{ d.deployed_at.strftime("%m-%d %H:%M") }}</td>
+        <td>
+          <button class="btn-ghost" hx-post="{{ u('/api/deployments') }}/{{ d.id }}/regression-check" hx-swap="none">verify</button>
+          {% if not d.rollback_of_id %}
+          <button class="btn-ghost" hx-post="{{ u('/api/deployments') }}/{{ d.id }}/rollback" hx-confirm="Rollback deployment {{ (d.sha or '')[:8] }}? Butuh approval + agent execution." hx-swap="none">rollback</button>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<div class="card"><p class="muted" style="margin:0">Tidak ada deployments tercatat.</p></div>{% endif %}
+
+    <h2>Postmortems</h2>
+    {% if postmortems %}
+    <table>
+      <tr><th>Judul</th><th>Status</th><th>Export</th></tr>
+      {% for p in postmortems %}
+      <tr>
+        <td>{{ p.title }}</td>
+        <td class="muted">{{ "published" if p.published else "draft" }}</td>
+        <td><a href="{{ u('/api/postmortems') }}/{{ p.id }}/export.md">md</a></td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<div class="card"><p class="muted" style="margin:0">Belum ada postmortem — dibuat otomatis saat incident selesai.</p></div>{% endif %}
+
+    <h2>Timeline <span class="cap">50 event terakhir</span></h2>
+    {% if timeline %}
+    <table>
+      <tr><th>Waktu</th><th>Event</th></tr>
+      {% for e in timeline %}
+      <tr>
+        <td class="muted">{{ e.ts.strftime("%m-%d %H:%M:%S") }}<div class="muted">{{ e.kind }}</div></td>
+        <td>{{ e.summary }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<div class="card"><p class="muted" style="margin:0">Belum ada timeline events.</p></div>{% endif %}
+  </div>
 </div>
-{% else %}<p class="muted">No DORA data yet.</p>{% endif %}
-
-<h2>Timeline</h2>
-{% if timeline %}
-<table>
-  <tr><th>Time</th><th>Kind</th><th>Actor</th><th>Event</th></tr>
-  {% for e in timeline %}
-  <tr>
-    <td class="muted">{{ e.ts.strftime("%m-%d %H:%M:%S") }}</td>
-    <td class="muted">{{ e.kind }}</td>
-    <td class="muted">{{ e.actor or "—" }}</td>
-    <td>{{ e.summary }}</td>
-  </tr>
-  {% endfor %}
-</table>
-{% else %}<p class="muted">No timeline events.</p>{% endif %}
 {% endblock %}

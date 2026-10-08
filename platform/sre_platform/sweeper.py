@@ -20,6 +20,7 @@ from .config import settings
 from .db import SessionLocal
 from .llm import LLMClient
 from .models import Application, Deployment, Incident, IncidentStatus
+from .quickreminders import check_metric_slos, check_recurring_errors
 from .rules_extra import rule_log_error_spike, rule_ssl_expiry
 from . import investigation
 
@@ -75,6 +76,7 @@ def _run_sweep() -> None:
         client = LLMClient()
         from .deps import probe_all_for_app
         from .forecast import rule_capacity_forecast
+        from .external_probe import probe_unconfirmed_externals
 
         for app_row in apps:
             if app_row.confirmed:
@@ -88,12 +90,25 @@ def _run_sweep() -> None:
                     probe_all_for_app(db, app_row)
                 except Exception:
                     log.debug("dep probe failed for %s", app_row.slug, exc_info=True)
+                # M11 quick reminders: metric-SLO breaches + recurring errors
+                try:
+                    fired += check_metric_slos(db, app_row, client)
+                except Exception:
+                    log.debug("slo quick check failed for %s", app_row.slug, exc_info=True)
+                try:
+                    fired += check_recurring_errors(db, app_row, client)
+                except Exception:
+                    log.debug("recurring error check failed for %s", app_row.slug, exc_info=True)
                 if client.enabled and _llm_ready(app_row.id):
                     try:
                         ai_findings = investigation.llm_periodic_analysis(db, app_row, client)
                         fired += [f.rule_key or "llm" for f in ai_findings]
                     except Exception:
                         log.warning("llm analysis failed for %s", app_row.slug, exc_info=True)
+        try:
+            probe_unconfirmed_externals(db)
+        except Exception:
+            log.debug("external probe failed", exc_info=True)
         opened = incidents.detect_incidents(db)
         # LLM deep-dive on fresh incidents (deterministic verdict already present)
         for incident in opened:
@@ -127,6 +142,14 @@ def _run_sweep() -> None:
                 except Exception:
                     log.warning("postmortem generation failed for incident %s", incident.id, exc_info=True)
         _refresh_slo(db)
+        # M11: finalize finished perf tests
+        try:
+            from .quickreport import finish_due_perf_tests
+
+            done_tests = finish_due_perf_tests(db)
+        except Exception:
+            done_tests = 0
+            log.debug("perf test finalization failed", exc_info=True)
         # M9/M10: CI status watch + regression checks on recent deployments
         try:
             from .ciwatch import watch_all
